@@ -6,6 +6,7 @@ import { dismissNotice, notify, useNotices } from './notify'
 import { buildHash, urlProblems, type Route } from './urlState'
 import PlaygroundView from './tools/playground/PlaygroundView.vue'
 import KernelsView from './tools/kernels/KernelsView.vue'
+import DataLabView from './tools/datalab/DataLabView.vue'
 
 const { lang, t } = useI18n()
 const current = useRoute()
@@ -70,9 +71,13 @@ function toggleLang() {
       </p>
     </section>
     <main>
-      <PlaygroundView v-if="route === 'playground'" />
-      <KernelsView v-else-if="route === 'kernels'" />
-      <p v-else>{{ t('home.placeholder') }}</p>
+      <!-- The Daten-Lab keeps its data, settings and a running optimisation when another tool is opened. -->
+      <KeepAlive include="DataLabView">
+        <PlaygroundView v-if="route === 'playground'" />
+        <KernelsView v-else-if="route === 'kernels'" />
+        <DataLabView v-else-if="route === 'datalab'" />
+        <p v-else>{{ t('home.placeholder') }}</p>
+      </KeepAlive>
     </main>
   </div>
 </template>
