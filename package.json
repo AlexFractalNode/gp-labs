@@ -21,6 +21,7 @@
     "vue": "3.5.43"
   },
   "devDependencies": {
+    "@playwright/test": "1.64.0",
     "@types/d3-scale": "^4.0.9",
     "@types/d3-shape": "^3.2.0",
     "@types/katex": "^0.16.8",
