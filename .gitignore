@@ -8,3 +8,4 @@ playwright-report/
 *.ipynb
 *.pdf
 .superpowers/
+docs/superpowers/
