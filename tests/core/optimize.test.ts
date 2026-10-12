@@ -66,6 +66,50 @@ describe('lbfgsb', () => {
       TypeError,
     )
   })
+
+  it('keeps L-BFGS curvature pairs on the free subspace when a coordinate sits on a bound', () => {
+    // c is pinned at its lower bound 0 (∂f/∂c > 0 everywhere); ∂f/∂c varies strongly with the free a, b.
+    // A non-zero y_c in the stored pairs would wreck γ and the two-loop direction (it then stalls far from
+    // the optimum within 200 iterations); restricted pairs converge in a handful of iterations.
+    const K = 1000
+    const f = (x: Float64Array) => {
+      const [a, b, c] = x
+      return {
+        value: (a - 3) ** 2 + 10 * (b - a) ** 2 + c * (1 + K * (a * a + b * b)),
+        grad: Float64Array.from([
+          2 * (a - 3) - 20 * (b - a) + 2 * K * c * a,
+          20 * (b - a) + 2 * K * c * b,
+          1 + K * (a * a + b * b),
+        ]),
+      }
+    }
+    const r = lbfgsb(f, new Float64Array(3), Float64Array.from([-10, -10, 0]), Float64Array.from([10, 10, 10]))
+    expect(r.converged).toBe(true)
+    expect(r.iterations).toBeLessThanOrEqual(20)
+    expect(r.x[2]).toBe(0)
+    expect(Math.abs(r.x[0] - 3)).toBeLessThan(1e-6)
+    expect(Math.abs(r.x[1] - 3)).toBeLessThan(1e-6)
+  })
+
+  it('retries with steepest descent when the line search along the L-BFGS direction fails', () => {
+    // Evaluation 1 is x0, evaluation 2 the accepted first (steepest) step, which stores a curvature pair.
+    // Evaluations 3…52 (the 50 trial points along the first L-BFGS direction) fail with a GpError, so that
+    // line search fails; the retry with steepest descent must continue to the minimum at (1, 2).
+    let calls = 0
+    const f = (x: Float64Array) => {
+      calls++
+      if (calls >= 3 && calls <= 52) throw new GpError('NotPositiveDefinite')
+      return {
+        value: (x[0] - 1) ** 2 + (x[1] - 2) ** 2,
+        grad: Float64Array.from([2 * (x[0] - 1), 2 * (x[1] - 2)]),
+      }
+    }
+    const r = lbfgsb(f, new Float64Array(2), Float64Array.from([-10, -10]), Float64Array.from([10, 10]))
+    expect(calls).toBeGreaterThan(52)
+    expect(r.converged).toBe(true)
+    expect(Math.abs(r.x[0] - 1)).toBeLessThan(1e-6)
+    expect(Math.abs(r.x[1] - 2)).toBeLessThan(1e-6)
+  })
 })
 
 describe('optimizeHyperparameters', () => {
@@ -82,6 +126,7 @@ describe('optimizeHyperparameters', () => {
     })
     expect(res.logML).toBeGreaterThanOrEqual(reference)
     expect(res.runs).toHaveLength(4)
+    expect(Math.max(...res.runs.map((run) => run.logML))).toBe(res.logML)
     expect(progress.map((p) => p.restart)).toEqual([0, 1, 2, 3])
     expect(logMarginalLikelihood(res.model, X, y).value).toBeCloseTo(res.logML, 8)
   })
@@ -131,5 +176,18 @@ describe('optimizeHyperparameters', () => {
     })
     expect(res.runs).toHaveLength(1)
     expect(Number.isFinite(res.logML)).toBe(true)
+  })
+
+  it('is deterministic for a fixed seed', () => {
+    const g = loadGolden('sine')
+    const X = col(g.x.slice(0, 30))
+    const y = Float64Array.from(g.y.slice(0, 30))
+    const run = () => optimizeHyperparameters(rbfModel(1, 1, 1), X, y, { restarts: 3, seed: 7 })
+    const a = run()
+    const b = run()
+    expect(b.model).toEqual(a.model)
+    expect(b.logML).toBe(a.logML)
+    expect(b.atBound).toEqual(a.atBound)
+    expect(b.runs.map((r) => Array.from(r.x))).toEqual(a.runs.map((r) => Array.from(r.x)))
   })
 })

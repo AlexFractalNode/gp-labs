@@ -14,6 +14,16 @@ export interface OptResult {
   converged: boolean
 }
 
+/** One multistart run of optimizeHyperparameters, in likelihood orientation. */
+export interface HyperparameterRun {
+  /** Final log-parameters (order of modelParams). */
+  x: Float64Array
+  /** log ML at x (+log ML, not the minimised −log ML); −Infinity if the run never reached a finite value. */
+  logML: number
+  iterations: number
+  converged: boolean
+}
+
 export type Objective = (x: Float64Array) => { value: number; grad: Float64Array }
 
 /** Armijo sufficient-decrease constant. */
@@ -58,6 +68,60 @@ function safeEval(f: Objective, x: Float64Array): { value: number; grad: Float64
   }
 }
 
+/** −H·g by the L-BFGS two-loop recursion on the free variables (active components of g and d are zero). */
+function twoLoopDirection(
+  g: Float64Array,
+  active: Uint8Array,
+  S: Float64Array[],
+  Y: Float64Array[],
+  RHO: number[],
+): Float64Array {
+  const n = g.length
+  const q = Float64Array.from(g, (v, i) => (active[i] ? 0 : v))
+  const alphas = new Array<number>(S.length)
+  for (let k = S.length - 1; k >= 0; k--) {
+    alphas[k] = RHO[k] * dot(S[k], q)
+    for (let i = 0; i < n; i++) q[i] -= alphas[k] * Y[k][i]
+  }
+  const k0 = S.length - 1
+  const gamma = k0 >= 0 ? dot(S[k0], Y[k0]) / dot(Y[k0], Y[k0]) : 1
+  for (let i = 0; i < n; i++) q[i] *= gamma
+  for (let k = 0; k < S.length; k++) {
+    const beta = RHO[k] * dot(Y[k], q)
+    for (let i = 0; i < n; i++) q[i] += S[k][i] * (alphas[k] - beta)
+  }
+  return Float64Array.from(q, (v, i) => (active[i] ? 0 : -v))
+}
+
+/**
+ * Armijo backtracking along the projected path P(x + t d). Initial step: 1 with curvature information,
+ * otherwise a unit-length step in the max-norm. Returns null if no step is accepted.
+ */
+function lineSearch(
+  f: Objective,
+  x: Float64Array,
+  fx: number,
+  g: Float64Array,
+  d: Float64Array,
+  lower: Float64Array,
+  upper: Float64Array,
+  hasHistory: boolean,
+): { x: Float64Array; value: number; grad: Float64Array } | null {
+  const n = x.length
+  let t = hasHistory ? 1 : Math.min(1, 1 / d.reduce((a, v) => Math.max(a, Math.abs(v)), 0))
+  for (let bt = 0; bt < MAX_BACKTRACK; bt++) {
+    const xn = Float64Array.from(x, (v, i) => clampInto(v + t * d[i], lower[i], upper[i]))
+    let decrease = 0
+    for (let i = 0; i < n; i++) decrease += g[i] * (xn[i] - x[i])
+    if (decrease < 0) {
+      const r = safeEval(f, xn)
+      if (Number.isFinite(r.value) && r.value <= fx + C1 * decrease) return { x: xn, value: r.value, grad: r.grad }
+    }
+    t *= 0.5
+  }
+  return null
+}
+
 /**
  * Projected L-BFGS with Armijo backtracking on the box [lower, upper].
  * Iterates are clamped to the bounds; variables at a bound whose gradient points outward are held fixed
@@ -90,6 +154,11 @@ export function lbfgsb(
   const Y: Float64Array[] = []
   const RHO: number[] = []
   let prevActive = ''
+  const clearHistory = (): void => {
+    S.length = 0
+    Y.length = 0
+    RHO.length = 0
+  }
   let iter = 0
 
   while (iter < maxIter) {
@@ -105,59 +174,34 @@ export function lbfgsb(
     if (pgNorm < tol) return { x, value: cur.value, iterations: iter, converged: true }
     const activeKey = active.join('')
     if (activeKey !== prevActive) {
-      S.length = 0
-      Y.length = 0
-      RHO.length = 0
+      clearHistory()
       prevActive = activeKey
     }
 
-    // Two-loop recursion on the free variables.
-    const q = Float64Array.from(g, (v, i) => (active[i] ? 0 : v))
-    const alphas = new Array<number>(S.length)
-    for (let k = S.length - 1; k >= 0; k--) {
-      alphas[k] = RHO[k] * dot(S[k], q)
-      for (let i = 0; i < n; i++) q[i] -= alphas[k] * Y[k][i]
-    }
-    const k0 = S.length - 1
-    const gamma = k0 >= 0 ? dot(S[k0], Y[k0]) / dot(Y[k0], Y[k0]) : 1
-    for (let i = 0; i < n; i++) q[i] *= gamma
-    for (let k = 0; k < S.length; k++) {
-      const beta = RHO[k] * dot(Y[k], q)
-      for (let i = 0; i < n; i++) q[i] += S[k][i] * (alphas[k] - beta)
-    }
-    let d = Float64Array.from(q, (v, i) => (active[i] ? 0 : -v))
-    let slope = dot(g, d)
-    if (!(slope < 0)) {
-      // Not a descent direction: fall back to steepest descent and drop the history.
-      S.length = 0
-      Y.length = 0
-      RHO.length = 0
-      d = Float64Array.from(g, (v, i) => (active[i] ? 0 : -v))
-      slope = dot(g, d)
-      if (!(slope < 0)) return { x, value: cur.value, iterations: iter, converged: false }
-    }
-
-    // Initial step: 1 with curvature information, otherwise a unit-length step in the max-norm.
-    let t = S.length > 0 ? 1 : Math.min(1, 1 / d.reduce((a, v) => Math.max(a, Math.abs(v)), 0))
+    // Up to two attempts: the L-BFGS direction, then (if its line search fails with a non-empty history)
+    // steepest descent with the history dropped.
     let accepted: { x: Float64Array; value: number; grad: Float64Array } | null = null
-    for (let bt = 0; bt < MAX_BACKTRACK; bt++) {
-      const xn = Float64Array.from(x, (v, i) => clampInto(v + t * d[i], lower[i], upper[i]))
-      let decrease = 0
-      for (let i = 0; i < n; i++) decrease += g[i] * (xn[i] - x[i])
-      if (decrease < 0) {
-        const r = safeEval(f, xn)
-        if (Number.isFinite(r.value) && r.value <= cur.value + C1 * decrease) {
-          accepted = { x: xn, value: r.value, grad: r.grad }
-          break
-        }
+    for (let attempt = 0; attempt < 2 && !accepted; attempt++) {
+      if (attempt === 1) {
+        if (S.length === 0) break // the failed direction already was steepest descent
+        clearHistory()
       }
-      t *= 0.5
+      let d = twoLoopDirection(g, active, S, Y, RHO)
+      if (!(dot(g, d) < 0)) {
+        // Not a descent direction: fall back to steepest descent and drop the history.
+        clearHistory()
+        d = Float64Array.from(g, (v, i) => (active[i] ? 0 : -v))
+        if (!(dot(g, d) < 0)) return { x, value: cur.value, iterations: iter, converged: false }
+      }
+      accepted = lineSearch(f, x, cur.value, g, d, lower, upper, S.length > 0)
     }
     iter++
     if (!accepted) return { x, value: cur.value, iterations: iter, converged: false }
 
     const s = Float64Array.from(accepted.x, (v, i) => v - x[i])
-    const yv = Float64Array.from(accepted.grad, (v, i) => v - g[i])
+    // Restrict the pair to the free subspace: active coordinates have s_i = 0, and a non-zero y_i there would
+    // distort γ, ρ and the two-loop recursion. The active set is constant until the next history reset.
+    const yv = Float64Array.from(accepted.grad, (v, i) => (active[i] ? 0 : v - g[i]))
     const sy = dot(s, yv)
     if (sy > MIN_CURVATURE) {
       S.push(s)
@@ -191,6 +235,8 @@ function validateData(X: Mat, y: Float64Array): void {
  * the bounds); runs 1…restarts start uniformly in the log-bounds clipped to ±3 log units around them (sklearn's
  * n_restarts_optimizer convention: restarts + 1 runs in total). `shouldStop` is checked before every run after
  * the first. Throws GpError('OptimizerFailed') if no run reaches a finite value.
+ * Returns the best model, its log ML, every run (reported as +log ML) and the parameter names within 1e-3 log
+ * units of a bound.
  */
 export function optimizeHyperparameters(
   model: GpModel,
@@ -203,7 +249,7 @@ export function optimizeHyperparameters(
     onProgress?: (p: { restart: number; logML: number }) => void
     shouldStop?: () => boolean
   },
-): { model: GpModel; logML: number; runs: OptResult[]; atBound: string[] } {
+): { model: GpModel; logML: number; runs: HyperparameterRun[]; atBound: string[] } {
   validateData(X, y)
   if (!(opts.restarts >= 0) || !Number.isInteger(opts.restarts)) {
     throw new GpError('InvalidInput', { reason: 'restarts', value: opts.restarts })
@@ -219,7 +265,7 @@ export function optimizeHyperparameters(
     return { value: -r.value, grad: r.grad.map((v) => -v) }
   }
 
-  const runs: OptResult[] = []
+  const runs: HyperparameterRun[] = []
   let best: OptResult | null = null
   for (let r = 0; r <= opts.restarts; r++) {
     if (r > 0 && opts.shouldStop?.()) break
@@ -232,7 +278,7 @@ export function optimizeHyperparameters(
             return a + (b - a) * rng.uniform()
           })
     const res = lbfgsb(objective, start, lo, hi, { maxIter: opts.maxIter ?? 200 })
-    runs.push(res)
+    runs.push({ x: res.x, logML: -res.value, iterations: res.iterations, converged: res.converged })
     if (Number.isFinite(res.value) && (best === null || res.value < best.value)) best = res
     opts.onProgress?.({ restart: r, logML: best ? -best.value : -Infinity })
   }

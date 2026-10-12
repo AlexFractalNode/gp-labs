@@ -63,6 +63,7 @@ export function createOptimizeClient(createWorker: () => Worker = defaultCreateW
     if (!worker) return
     worker.onmessage = null
     worker.onerror = null
+    worker.onmessageerror = null
     worker.terminate()
     worker = null
   }
@@ -86,11 +87,20 @@ export function createOptimizeClient(createWorker: () => Worker = defaultCreateW
     }
   }
 
-  function onError(ev: ErrorEvent): void {
+  /** Rejects the current run with OptimizerFailed and discards the worker (it may still be busy). */
+  function failCurrent(details: Record<string, unknown>): void {
     const p = pending
     pending = null
     dropWorker()
-    p?.reject(new GpError('OptimizerFailed', { reason: 'workerError', message: ev.message }))
+    p?.reject(new GpError('OptimizerFailed', details))
+  }
+
+  function onError(ev: ErrorEvent): void {
+    failCurrent({ reason: 'workerError', message: ev.message })
+  }
+
+  function onMessageError(): void {
+    failCurrent({ reason: 'messageError' })
   }
 
   function ensureWorker(): Worker {
@@ -98,6 +108,7 @@ export function createOptimizeClient(createWorker: () => Worker = defaultCreateW
       worker = createWorker()
       worker.onmessage = onMessage
       worker.onerror = onError
+      worker.onmessageerror = onMessageError
     }
     return worker
   }
@@ -116,7 +127,13 @@ export function createOptimizeClient(createWorker: () => Worker = defaultCreateW
       pending = { runId, onProgress, resolve, reject }
     })
     const request: WorkerRequest = { type: 'optimize', runId, job }
-    ensureWorker().postMessage(request)
+    try {
+      ensureWorker().postMessage(request)
+    } catch (e) {
+      // Worker creation or structured cloning failed synchronously: settle this run now so no orphaned
+      // promise remains pending; the caller observes the rejection through `result`.
+      failCurrent({ reason: 'postFailed', message: e instanceof Error ? e.message : String(e) })
+    }
     return { runId, result, cancel: () => cancelRun(runId) }
   }
 

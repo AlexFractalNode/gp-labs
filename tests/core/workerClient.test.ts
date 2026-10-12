@@ -7,9 +7,12 @@ import { createOptimizeClient, type OptimizeJob, type WorkerRequest, type Worker
 class FakeWorker {
   onmessage: ((ev: MessageEvent<WorkerResponse>) => void) | null = null
   onerror: ((ev: ErrorEvent) => void) | null = null
+  onmessageerror: ((ev: MessageEvent) => void) | null = null
   posted: WorkerRequest[] = []
   terminated = false
+  throwOnPost = false
   postMessage(msg: WorkerRequest): void {
+    if (this.throwOnPost) throw new Error('DataCloneError')
     this.posted.push(msg)
   }
   terminate(): void {
@@ -27,10 +30,11 @@ const model = (ell: number): GpModel => ({
 })
 const job = (ell: number): OptimizeJob => ({ model: model(ell), X: [[0], [1]], y: [0, 1], restarts: 1, seed: 0 })
 
-function setup() {
+function setup(opts: { throwOnPost?: boolean } = {}) {
   const workers: FakeWorker[] = []
   const client = createOptimizeClient(() => {
     const w = new FakeWorker()
+    w.throwOnPost = workers.length === 0 && !!opts.throwOnPost
     workers.push(w)
     return w as unknown as Worker
   })
@@ -111,5 +115,24 @@ describe('worker client', () => {
     await a.result
     a.cancel()
     expect(workers[0].terminated).toBe(false)
+  })
+
+  it('rejects (no orphaned pending run) when postMessage throws synchronously, then recovers', async () => {
+    const { workers, client } = setup({ throwOnPost: true })
+    const a = client.startOptimize(job(1), () => {})
+    await expect(a.result).rejects.toMatchObject({ code: 'OptimizerFailed', details: { reason: 'postFailed' } })
+    expect(workers[0].terminated).toBe(true)
+    const b = client.startOptimize(job(1), () => {})
+    expect(workers).toHaveLength(2)
+    workers[1].emit({ type: 'done', runId: b.runId, model: model(1), logML: 2, atBound: [] })
+    await expect(b.result).resolves.toMatchObject({ logML: 2 })
+  })
+
+  it('rejects the current run on a messageerror event', async () => {
+    const { workers, client } = setup()
+    const a = client.startOptimize(job(1), () => {})
+    workers[0].onmessageerror?.({} as MessageEvent)
+    await expect(a.result).rejects.toMatchObject({ code: 'OptimizerFailed', details: { reason: 'messageError' } })
+    expect(workers[0].terminated).toBe(true)
   })
 })
