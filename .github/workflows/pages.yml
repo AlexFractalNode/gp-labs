@@ -26,8 +26,7 @@ jobs:
       - run: npm ci
       - run: npm run guard
       - uses: astral-sh/setup-uv@v5
-      # pytest exits with 5 while tests/py holds no tests yet; treat that as success.
-      - run: npm run test:py || [ $? -eq 5 ]
+      - run: npm run test:py
       - run: npm test
       - run: npm run build
         env:
