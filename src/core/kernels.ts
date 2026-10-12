@@ -54,6 +54,8 @@ export interface ParamInfo {
 
 export const MAX_TERMS = 6
 export const MAX_FACTORS = 4
+/** Largest number of ARD length scales (ell_0 … ell_9). */
+export const MAX_ARD_DIM = 10
 /** Natural-unit bounds of every free (log-space) parameter (sklearn defaults). */
 export const PARAM_BOUNDS: readonly [number, number] = [1e-5, 1e5]
 /** Step of the central finite differences in log space. */
@@ -66,15 +68,12 @@ interface KindInfo {
   params: readonly string[]
   /** Parameters that may be free (optimised in log space) unless listed in `fixed`. */
   logParams: readonly string[]
-  /** Parameters that must be > 0. */
-  positive: readonly string[]
   defaults: Readonly<Record<string, number>>
 }
 
 const SCALED: Omit<KindInfo, 'defaults'> = {
   params: ['sigma', 'ell'],
   logParams: ['sigma', 'ell'],
-  positive: ['sigma', 'ell'],
 }
 
 const KINDS: Readonly<Record<BaseKind, KindInfo>> = {
@@ -86,39 +85,56 @@ const KINDS: Readonly<Record<BaseKind, KindInfo>> = {
   rq: {
     params: ['sigma', 'ell', 'alpha'],
     logParams: ['sigma', 'ell', 'alpha'],
-    positive: ['sigma', 'ell', 'alpha'],
     defaults: { sigma: 1, ell: 1, alpha: 1 },
   },
   periodic: {
     params: ['sigma', 'ell', 'period'],
     logParams: ['sigma', 'ell', 'period'],
-    positive: ['sigma', 'ell', 'period'],
     defaults: { sigma: 1, ell: 1, period: 1 },
   },
-  linear: { params: ['sigma0', 'c'], logParams: ['sigma0'], positive: [], defaults: { sigma0: 1, c: 0 } },
+  linear: { params: ['sigma0', 'c'], logParams: ['sigma0'], defaults: { sigma0: 1, c: 0 } },
   polynomial: {
     params: ['c', 'offset', 'degree'],
     logParams: [],
-    positive: [],
     defaults: { c: 1, offset: 1, degree: 3 },
   },
-  constant: { params: ['c'], logParams: ['c'], positive: ['c'], defaults: { c: 1 } },
-  white: { params: ['sigma'], logParams: ['sigma'], positive: ['sigma'], defaults: { sigma: 1 } },
+  constant: { params: ['c'], logParams: ['c'], defaults: { c: 1 } },
+  white: { params: ['sigma'], logParams: ['sigma'], defaults: { sigma: 1 } },
   gibbs: {
     params: ['sigma', 'l1', 'l2', 'w', 'x0'],
     logParams: ['sigma', 'l1', 'l2', 'w'],
-    positive: ['sigma', 'l1', 'l2', 'w'],
     defaults: { sigma: 1, l1: 0.05, l2: 0.6, w: 0.3, x0: 1 },
   },
   powexp: {
     params: ['sigma', 'ell', 'p'],
     logParams: ['sigma', 'ell'],
-    positive: ['sigma', 'ell'],
     defaults: { sigma: 1, ell: 1, p: 2 },
   },
 }
 
 export const BASE_KINDS = Object.keys(KINDS) as BaseKind[]
+
+/** Parameter names of a kind in canonical order ('ell' stands for ell_0 … ell_{d−1} under ARD). */
+export function kindParams(kind: BaseKind): readonly string[] {
+  return KINDS[kind].params
+}
+
+/** Parameters of a kind that may be free in log space (scales, lengths, α, period, constant c, l1, l2, w). */
+export function logParams(kind: BaseKind): readonly string[] {
+  return KINDS[kind].logParams
+}
+
+const LOCATION_PARAMS = Object.fromEntries(
+  BASE_KINDS.map((k) => [k, Object.freeze(KINDS[k].params.filter((q) => !KINDS[k].logParams.includes(q)))]),
+) as Readonly<Record<BaseKind, readonly string[]>>
+
+/**
+ * Location/shape parameters of a kind (linear/polynomial c, offset, degree, gibbs x0, powexp p). They are never
+ * free, use linear sliders and are always treated as fixed.
+ */
+export function locationParams(kind: BaseKind): readonly string[] {
+  return LOCATION_PARAMS[kind]
+}
 
 /** A base kernel with the default parameters of the table in Spec §3.4; location/shape params fixed. */
 export function defaultKernel(kind: BaseKind): BaseKernel {
@@ -179,32 +195,39 @@ function factorProblem(f: unknown): string | null {
   if (typeof f.kind !== 'string' || !Object.prototype.hasOwnProperty.call(KINDS, f.kind)) return 'kind'
   const kind = f.kind as BaseKind
   const info = KINDS[kind]
-  if (f.ard !== undefined && typeof f.ard !== 'boolean') return 'ard'
-  const ard = f.ard === true
-  if (ard && !info.params.includes('ell')) return 'ard'
-  if (ard && f.warp !== undefined && (f.warp as { kind?: unknown }).kind !== 'identity') return 'ardWarp'
-  if (!isObj(f.params)) return 'params'
-  const params = f.params
-  const keys = expectedKeys(kind, params, ard)
-  if (ard && !keys.some((k) => k.startsWith('ell_'))) return 'params'
-  if (!hasExactKeys(params, keys)) return 'params'
-  if (!keys.every((k) => isFiniteNum(params[k]))) return 'paramValue'
-  const p = params as Record<string, number>
-  for (const k of keys) {
-    const base = k.startsWith('ell_') ? 'ell' : k
-    if (info.positive.includes(base) && !(p[k] > 0)) return 'paramRange'
-  }
-  if (f.fixed !== undefined) {
-    if (!Array.isArray(f.fixed) || !f.fixed.every((x) => typeof x === 'string' && keys.includes(x))) return 'fixed'
-  }
-  const fixed = (f.fixed ?? []) as string[]
-  if (kind === 'linear' && !(p.sigma0 > 0 || (p.sigma0 === 0 && fixed.includes('sigma0')))) return 'paramRange'
-  if (kind === 'polynomial' && !(Number.isInteger(p.degree) && p.degree >= 1 && p.degree <= 5)) return 'paramRange'
-  if (kind === 'powexp' && !(p.p >= 0.5 && p.p <= 3)) return 'paramRange'
+  // Shape checks of the optional fields first, so that later reads never touch a non-object.
   if (f.warp !== undefined) {
     const w = warpProblem(f.warp)
     if (w) return w
   }
+  if (f.ard !== undefined && typeof f.ard !== 'boolean') return 'ard'
+  const ard = f.ard === true
+  if (ard && !info.params.includes('ell')) return 'ard'
+  if (ard && f.warp !== undefined && (f.warp as Warp).kind !== 'identity') return 'ardWarp'
+  if (!isObj(f.params)) return 'params'
+  const params = f.params
+  const keys = expectedKeys(kind, params, ard)
+  if (ard) {
+    const k = keys.filter((key) => ARD_KEY.test(key)).length
+    if (k === 0 || k > MAX_ARD_DIM) return 'ardDimension'
+  }
+  if (!hasExactKeys(params, keys)) return 'params'
+  if (!keys.every((k) => isFiniteNum(params[k]))) return 'paramValue'
+  if (f.fixed !== undefined) {
+    if (!Array.isArray(f.fixed) || !f.fixed.every((x) => typeof x === 'string' && keys.includes(x))) return 'fixed'
+  }
+  const fixed = new Set((f.fixed ?? []) as string[])
+  const p = params as Record<string, number>
+  const [lo, hi] = PARAM_BOUNDS
+  for (const k of keys) {
+    const base = ARD_KEY.test(k) ? 'ell' : k
+    if (!info.logParams.includes(base)) continue
+    // Log-space parameters lie in PARAM_BOUNDS; only a fixed linear σ₀ may be exactly 0.
+    if (kind === 'linear' && k === 'sigma0' && p[k] === 0 && fixed.has('sigma0')) continue
+    if (!(p[k] >= lo && p[k] <= hi)) return 'paramRange'
+  }
+  if (kind === 'polynomial' && !(Number.isInteger(p.degree) && p.degree >= 1 && p.degree <= 5)) return 'paramRange'
+  if (kind === 'powexp' && !(p.p >= 0.5 && p.p <= 3)) return 'paramRange'
   if (f.activeDims !== undefined) {
     const ad = f.activeDims
     if (
@@ -440,15 +463,19 @@ export function kernelMatrix(spec: KernelSpec, A: Mat, B: Mat, opts?: { sameSet?
   return K
 }
 
-/** diag K(A, A) including white noise (A is its own point set). */
-export function kernelDiag(spec: KernelSpec, A: Mat): Float64Array {
+/**
+ * diag k(a_i, a_i). White noise is counted only when `sameSet` is true (the default, matching
+ * kernelMatrix(spec, A, A, { sameSet: true })); with `sameSet: false` it matches kernelMatrix(spec, A, A).
+ */
+export function kernelDiag(spec: KernelSpec, A: Mat, opts?: { sameSet?: boolean }): Float64Array {
   assertSpec(spec)
+  const same = opts?.sameSet ?? true
   const out = new Float64Array(A.rows)
   for (const term of spec.terms) {
     const prod = new Float64Array(A.rows).fill(1)
     for (const f of term) {
       const U = prepare(f, A)
-      const fn = pairFn(f, U, U, true)
+      const fn = pairFn(f, U, U, same)
       for (let i = 0; i < A.rows; i++) prod[i] *= fn(i, i)
     }
     for (let i = 0; i < A.rows; i++) out[i] += prod[i]
@@ -463,9 +490,11 @@ function paramKeys(f: BaseKernel): string[] {
   return expectedKeys(f.kind, f.params, f.ard === true)
 }
 
-function isFree(f: BaseKernel, key: string): boolean {
-  const base = ARD_KEY.test(key) ? 'ell' : key
-  return KINDS[f.kind].logParams.includes(base) && !(f.fixed ?? []).includes(key)
+/** Free (log-space, not fixed) parameter keys of a factor in canonical order. */
+function freeKeys(f: BaseKernel): string[] {
+  const fixed = new Set(f.fixed ?? [])
+  const logParams = KINDS[f.kind].logParams
+  return paramKeys(f).filter((key) => logParams.includes(ARD_KEY.test(key) ? 'ell' : key) && !fixed.has(key))
 }
 
 /** Free (log-space) parameters in the order term → factor → canonical parameter order. */
@@ -477,8 +506,7 @@ export function freeParams(spec: KernelSpec, inputDim: number): ParamInfo {
     term.forEach((f, fi) => {
       if (f.ard) lengths(f, factorDim(f, inputDim))
       else factorDim(f, inputDim)
-      for (const key of paramKeys(f)) {
-        if (!isFree(f, key)) continue
+      for (const key of freeKeys(f)) {
         names.push(`t${t}.f${fi}.${key}`)
         values.push(Math.log(f.params[key]))
       }
@@ -512,8 +540,7 @@ export function withLogParams(spec: KernelSpec, inputDim: number, logValues: Flo
   let idx = 0
   out.terms.forEach((term) =>
     term.forEach((f) => {
-      for (const key of paramKeys(f)) {
-        if (!isFree(f, key)) continue
+      for (const key of freeKeys(f)) {
         const v = Math.exp(logValues[idx++])
         if (!(v > 0) || !Number.isFinite(v)) throw new GpError('InvalidInput', { reason: 'logValue', index: idx - 1 })
         f.params[key] = v
@@ -540,6 +567,13 @@ const ANALYTIC: ReadonlySet<BaseKind> = new Set<BaseKind>([
 function factorGradient(f: BaseKernel, key: string, U: Mat, F: Mat): Mat {
   const n = U.rows
   const p = f.params
+  const scale = (c: number) => {
+    const out = zeros(n, n)
+    for (let k = 0; k < out.data.length; k++) out.data[k] = c * F.data[k]
+    return out
+  }
+  // Every kind with σ is σ² times a σ-free function, so ∂k/∂log σ = 2k exactly (also for the FD kinds).
+  if (key === 'sigma') return scale(2)
   if (!ANALYTIC.has(f.kind)) {
     // Central differences in log space: (F(θ·e^h) − F(θ·e^−h)) / 2h.
     const at = (h: number) => {
@@ -553,13 +587,7 @@ function factorGradient(f: BaseKernel, key: string, U: Mat, F: Mat): Mat {
     for (let k = 0; k < out.data.length; k++) out.data[k] = (up.data[k] - dn.data[k]) / (2 * FD_STEP)
     return out
   }
-  const scale = (c: number) => {
-    const out = zeros(n, n)
-    for (let k = 0; k < out.data.length; k++) out.data[k] = c * F.data[k]
-    return out
-  }
-  // k ∝ σ² (or σ₀², c) ⇒ ∂k/∂log σ = 2 (that part of) k.
-  if (key === 'sigma') return scale(2)
+  // ∂c/∂log c = c; ∂(σ₀² + …)/∂log σ₀ = 2σ₀².
   if (f.kind === 'constant') return scale(1)
   if (f.kind === 'linear') return fill(n, n, () => 2 * p.sigma0 * p.sigma0)
 
@@ -644,8 +672,7 @@ export function kernelGradients(spec: KernelSpec, X: Mat): Mat[] {
     const inputs = term.map((f) => prepare(f, X))
     const mats = term.map((f, fi) => factorMatrix(f, inputs[fi], inputs[fi], true))
     term.forEach((f, fi) => {
-      for (const key of paramKeys(f)) {
-        if (!isFree(f, key)) continue
+      for (const key of freeKeys(f)) {
         const G = factorGradient(f, key, inputs[fi], mats[fi])
         for (let g = 0; g < term.length; g++) {
           if (g === fi) continue
@@ -699,7 +726,13 @@ function fmt(v: number): string {
 }
 
 /** KaTeX of one factor; `idx` is the 1-based factor number when the spec has several factors. */
-function factorTex(f: BaseKernel, idx: number | null, inProduct: boolean, defs: string[]): string {
+function factorTex(
+  f: BaseKernel,
+  idx: number | null,
+  inProduct: boolean,
+  inputDim: number | undefined,
+  defs: string[],
+): string {
   const sub = (base: string) => (idx === null ? base : `${base}_{${idx}}`)
   const sig2 = `${sub('\\sigma')}^2`
   let x = 'x'
@@ -732,9 +765,18 @@ function factorTex(f: BaseKernel, idx: number | null, inProduct: boolean, defs: 
     }
     case 'periodic': {
       const T = sub('p')
-      return ard
-        ? `${sig2} \\exp\\left(-\\tfrac{1}{2} \\textstyle\\sum_j \\sin^2\\bigl(\\pi (${x}_j - ${xp}_j)/${T}\\bigr)/${ellj}^2\\right)`
-        : `${sig2} \\exp\\left(-\\frac{\\sin^2\\bigl(\\pi\\, ${dist}/${T}\\bigr)}{2${ell}^2}\\right)`
+      // The scalar form is exact only when the base kernel surely sees a 1-D input; otherwise Σ_j, as computed.
+      const w = f.warp?.kind
+      const scalar =
+        w === 'square' ||
+        w === 'log' ||
+        w === 'tanh' ||
+        (w !== 'circle' && (f.activeDims ? f.activeDims.length === 1 : inputDim === 1))
+      if (ard || !scalar) {
+        const lj = ard ? ellj : ell
+        return `${sig2} \\exp\\left(-\\tfrac{1}{2} \\textstyle\\sum_j \\sin^2\\bigl(\\pi (${x}_j - ${xp}_j)/${T}\\bigr)/${lj}^2\\right)`
+      }
+      return `${sig2} \\exp\\left(-\\frac{\\sin^2\\bigl(\\pi\\, ${dist}/${T}\\bigr)}{2${ell}^2}\\right)`
     }
     case 'cosine':
       return `${sig2} \\cos\\left(2\\pi\\, ${R}\\right)`
@@ -767,14 +809,18 @@ function factorTex(f: BaseKernel, idx: number | null, inProduct: boolean, defs: 
   }
 }
 
-/** KaTeX string of the whole kernel, e.g. k(x,x') = \sigma^2 \exp(…) + …; warp/ℓ(x) definitions follow. */
-export function kernelTex(spec: KernelSpec): string {
+/**
+ * KaTeX string of the whole kernel, e.g. k(x,x') = \sigma^2 \exp(…) + …; warp/ℓ(x) definitions follow.
+ * With `inputDim: 1` periodic uses the scalar form sin²(π|x−x'|/p); otherwise (unknown or multi-D input,
+ * circle warp) it shows the per-dimension sum that is actually computed.
+ */
+export function kernelTex(spec: KernelSpec, opts?: { inputDim?: number }): string {
   assertSpec(spec)
   const many = spec.terms.reduce((s, t) => s + t.length, 0) > 1
   const defs: string[] = []
   let idx = 0
   const terms = spec.terms.map((term) =>
-    term.map((f) => factorTex(f, many ? ++idx : null, term.length > 1, defs)).join(' \\cdot '),
+    term.map((f) => factorTex(f, many ? ++idx : null, term.length > 1, opts?.inputDim, defs)).join(' \\cdot '),
   )
   const body = `k(x,x') = ${terms.join(' + ')}`
   return defs.length ? `${body},\\quad ${defs.join(',\\quad ')}` : body

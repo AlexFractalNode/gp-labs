@@ -8,6 +8,9 @@ import {
   kernelGradients,
   kernelMatrix,
   kernelTex,
+  kindParams,
+  locationParams,
+  logParams,
   withLogParams,
   type BaseKernel,
   type KernelSpec,
@@ -391,6 +394,126 @@ describe('kernelTex', () => {
       const tex = kernelTex(e.spec)
       expect(tex.startsWith("k(x,x') = ")).toBe(true)
       expect(tex.length).toBeGreaterThan("k(x,x') = ".length)
+    }
+  })
+})
+
+describe('review fixes', () => {
+  const hostile = {
+    terms: [[{ kind: 'rbf', ard: true, warp: null, params: { sigma: 1, ell_0: 1 } }]],
+  }
+
+  it('isKernelSpec returns false (no TypeError) for ard with warp: null', () => {
+    expect(() => isKernelSpec(hostile)).not.toThrow()
+    expect(isKernelSpec(hostile)).toBe(false)
+    expectThrowsCode(() => kernelMatrix(hostile as unknown as KernelSpec, col([0]), col([0])), 'InvalidInput')
+  })
+
+  it('guards only ever return false on other hostile shapes', () => {
+    const base = { kind: 'rbf', params: { sigma: 1, ell: 1 } }
+    const variants: unknown[] = [
+      undefined, 42, 'x', [], { terms: null }, { terms: [null] }, { terms: [[null]] }, { terms: [[[]]] },
+      { terms: [[{ ...base, params: null }]] },
+      { terms: [[{ ...base, params: [] }]] },
+      { terms: [[{ ...base, fixed: null }]] },
+      { terms: [[{ ...base, fixed: 'sigma' }]] },
+      { terms: [[{ ...base, activeDims: null }]] },
+      { terms: [[{ ...base, activeDims: ['0'] }]] },
+      { terms: [[{ ...base, warp: 'square' }]] },
+      { terms: [[{ ...base, warp: [] }]] },
+      { terms: [[{ ...base, warp: { kind: null } }]] },
+      { terms: [[{ ...base, ard: 'yes', warp: null }]] },
+      { terms: [[{ kind: 'rbf', ard: true, warp: 5, params: { sigma: 1, ell_0: 1 } }]] },
+      { terms: [[{ kind: 'rbf', ard: true, warp: { kind: 'circle' }, params: { sigma: 1, ell_0: 1 } }]] },
+      { terms: [[{ kind: 'toString', params: {} }]] },
+      { terms: [[{ kind: '__proto__', params: {} }]] },
+      JSON.parse('{"terms":[[{"kind":"rbf","params":{"sigma":1,"ell":1,"__proto__":{"x":1}}}]]}'),
+    ]
+    for (const v of variants) {
+      expect(() => isKernelSpec(v)).not.toThrow()
+      expect(isKernelSpec(v)).toBe(false)
+      try {
+        kernelMatrix(v as KernelSpec, col([0]), col([0]))
+        throw new Error('expected a throw')
+      } catch (e) {
+        expect(e).toBeInstanceOf(GpError)
+      }
+    }
+  })
+
+  it('exports location/shape and log parameter metadata per kind', () => {
+    expect(locationParams('rbf')).toEqual([])
+    expect(locationParams('linear')).toEqual(['c'])
+    expect(locationParams('polynomial')).toEqual(['c', 'offset', 'degree'])
+    expect(locationParams('gibbs')).toEqual(['x0'])
+    expect(locationParams('powexp')).toEqual(['p'])
+    expect(locationParams('constant')).toEqual([])
+    expect(logParams('gibbs')).toEqual(['sigma', 'l1', 'l2', 'w'])
+    expect(kindParams('rq')).toEqual(['sigma', 'ell', 'alpha'])
+    expect(Object.isFrozen(locationParams('polynomial'))).toBe(true)
+  })
+
+  it('enforces [1e-5, 1e5] on log-space parameters', () => {
+    const rbf = (ell: number) => one({ kind: 'rbf', params: { sigma: 1, ell } })
+    expect(isKernelSpec(rbf(1e-300))).toBe(false)
+    expect(isKernelSpec(rbf(1e6))).toBe(false)
+    expect(isKernelSpec(rbf(1e-5))).toBe(true)
+    expect(isKernelSpec(rbf(1e5))).toBe(true)
+    expect(isKernelSpec(one({ kind: 'white', params: { sigma: 2e5 } }))).toBe(false)
+    expect(isKernelSpec(one({ kind: 'gibbs', params: { sigma: 1, l1: 1e-6, l2: 0.6, w: 0.3, x0: 1 } }))).toBe(false)
+    expect(isKernelSpec(one({ kind: 'rbf', params: { sigma: 1, ell_0: 1, ell_1: 1e-9 }, ard: true }))).toBe(false)
+    expect(isKernelSpec(one({ kind: 'linear', params: { sigma0: 1e-7, c: 0 } }))).toBe(false)
+    expect(isKernelSpec(one({ kind: 'linear', params: { sigma0: 0, c: 0 }, fixed: ['sigma0'] }))).toBe(true)
+    // Fixed log parameters must still lie in range, so freeParams stays within its bounds after unfixing.
+    expect(isKernelSpec(one({ kind: 'rbf', params: { sigma: 1, ell: 1e6 }, fixed: ['ell'] }))).toBe(false)
+    // Location parameters are not range-limited.
+    expect(isKernelSpec(one({ kind: 'linear', params: { sigma0: 1, c: -1e7 } }))).toBe(true)
+  })
+
+  it('caps ARD at 10 dimensions', () => {
+    const ard = (k: number) => {
+      const params: Record<string, number> = { sigma: 1 }
+      for (let j = 0; j < k; j++) params[`ell_${j}`] = 1
+      return one({ kind: 'rbf', params, ard: true })
+    }
+    expect(isKernelSpec(ard(10))).toBe(true)
+    expect(isKernelSpec(ard(11))).toBe(false)
+  })
+
+  it('kernelDiag counts white only with sameSet (default true)', () => {
+    const spec: KernelSpec = {
+      terms: [[{ kind: 'rbf', params: { sigma: 1, ell: 1 } }], [{ kind: 'white', params: { sigma: 2 } }]],
+    }
+    const X = col([0, 1])
+    expect(Array.from(kernelDiag(spec, X))).toEqual([5, 5])
+    expect(Array.from(kernelDiag(spec, X, { sameSet: true }))).toEqual([5, 5])
+    expect(Array.from(kernelDiag(spec, X, { sameSet: false }))).toEqual([1, 1])
+  })
+
+  it('kernelTex shows the per-dimension sum for periodic unless the input is surely 1-D', () => {
+    const per = (extra: Partial<BaseKernel> = {}) =>
+      one({ kind: 'periodic', params: { sigma: 1, ell: 1, period: 1 }, ...extra })
+    expect(kernelTex(per())).toContain('\\sum_j')
+    expect(kernelTex(per(), { inputDim: 2 })).toContain('\\sum_j')
+    expect(kernelTex(per(), { inputDim: 1 })).not.toContain('\\sum_j')
+    expect(kernelTex(per({ activeDims: [1] }))).not.toContain('\\sum_j')
+    expect(kernelTex(per({ warp: { kind: 'square' } }))).not.toContain('\\sum_j')
+    expect(kernelTex(per({ warp: { kind: 'circle', period: 0.5 } }), { inputDim: 1 })).toContain('\\sum_j')
+  })
+
+  it('uses the exact sigma gradient 2k for finite-difference kinds', () => {
+    const X = col(linspace(0, 2, 6))
+    for (const f of [
+      { kind: 'powexp', params: { sigma: 1.3, ell: 0.5, p: 1.5 }, fixed: ['p'] },
+      { kind: 'gibbs', params: { sigma: 0.7, l1: 0.2, l2: 0.6, w: 0.3, x0: 1 }, fixed: ['x0'] },
+      { kind: 'cosine', params: { sigma: 1.1, ell: 1.5 } },
+      { kind: 'exponential', params: { sigma: 0.9, ell: 0.4 } },
+    ] as BaseKernel[]) {
+      const spec = one(f)
+      const K = kernelMatrix(spec, X, X, { sameSet: true })
+      const G = kernelGradients(spec, X)[0]
+      expect(freeParams(spec, 1).names[0]).toBe('t0.f0.sigma')
+      for (let k = 0; k < K.data.length; k++) expect(G.data[k]).toBe(2 * K.data[k])
     }
   })
 })

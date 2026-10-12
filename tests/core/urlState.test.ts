@@ -4,7 +4,9 @@ import {
   buildHash,
   decodeKernel,
   encodeKernel,
+  fromBase64Url,
   parseHash,
+  toBase64Url,
   urlProblems,
   type KernelSpec,
 } from '../../src/urlState'
@@ -38,6 +40,12 @@ describe('buildHash', () => {
 })
 
 describe('kernel codec', () => {
+  it('round-trips non-ASCII UTF-8 through base64url', () => {
+    const text = 'ℓ = 0,2 · σ² — Größe ✓ 𝔼[f]'
+    const enc = toBase64Url(text)
+    expect(enc).toMatch(/^[A-Za-z0-9_-]+$/)
+    expect(fromBase64Url(enc)).toBe(text)
+  })
   it('round-trips a valid spec', () => {
     const spec: KernelSpec = {
       terms: [[{ kind: 'rbf', params: { sigma: 1.5, ell: 0.2 } }, { kind: 'periodic', params: { sigma: 1, ell: 1, period: 0.5 } }]],

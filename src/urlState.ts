@@ -30,14 +30,14 @@ export function buildHash(route: Route, params?: Record<string, string>): string
   return qs ? `${path}?${qs}` : path
 }
 
-function toBase64Url(s: string): string {
+export function toBase64Url(s: string): string {
   const bytes = new TextEncoder().encode(s)
   let bin = ''
   for (const b of bytes) bin += String.fromCharCode(b)
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-function fromBase64Url(s: string): string {
+export function fromBase64Url(s: string): string {
   const b64 = s.replace(/-/g, '+').replace(/_/g, '/')
   const bin = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4))
   const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0))
