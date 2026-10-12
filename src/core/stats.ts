@@ -8,7 +8,8 @@ const D = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996, 3.7544
 const P_LOW = 0.02425
 
 /**
- * Quantile Φ⁻¹(p) of the standard normal distribution (Acklam's approximation, |relative error| < 1.2e-9).
+ * Quantile Φ⁻¹(p) of the standard normal distribution (Acklam's approximation, relative error < 1.15e-9,
+ * no refinement step).
  * Returns −Infinity for p = 0, +Infinity for p = 1 and NaN outside [0, 1].
  */
 export function normalQuantile(p: number): number {

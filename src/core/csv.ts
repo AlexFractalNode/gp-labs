@@ -56,8 +56,33 @@ function splitQuoted(line: string, sep: string): string[] {
 
 function splitLine(line: string, sep: Separator): string[] {
   if (sep !== 'whitespace') return splitQuoted(line, sep)
-  const t = line.trim()
-  return t === '' ? [] : t.split(/\s+/).map((f) => f.replace(/^"(.*)"$/, '$1'))
+  return splitWhitespace(line)
+}
+
+/** Splits at runs of whitespace; a double-quoted field may contain spaces ("" is an escaped quote). */
+function splitWhitespace(line: string): string[] {
+  const out: string[] = []
+  let i = 0
+  const n = line.length
+  const isSpace = (ch: string) => /\s/.test(ch)
+  while (i < n) {
+    while (i < n && isSpace(line[i])) i++
+    if (i >= n) break
+    let cur = ''
+    let inQuotes = false
+    while (i < n && (inQuotes || !isSpace(line[i]))) {
+      const ch = line[i]
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          cur += '"'
+          i++
+        } else inQuotes = !inQuotes
+      } else cur += ch
+      i++
+    }
+    out.push(cur)
+  }
+  return out
 }
 
 function parseCell(raw: string, sep: Separator): number | string | null {
@@ -70,28 +95,24 @@ function parseCell(raw: string, sep: Separator): number | string | null {
 
 /**
  * Separator choice: among the candidates whose field count is ≥ 2 and the same on the first PROBE_LINES
- * non-blank lines, the one with the most fields in the first line (ties: order ; tab , whitespace). If no
- * candidate is consistent, the one with the most fields (≥ 2) in the first line.
+ * non-blank lines, the first by priority ; > tab > , > whitespace (so `1,5;2,0` is split at `;`, not at the
+ * decimal commas). If no candidate is consistent, the one with the most fields (≥ 2) in the first line
+ * (ties: same priority order).
  */
 function detectSeparator(lines: { text: string }[]): Separator | null {
   const probe = lines.slice(0, PROBE_LINES)
-  let best: Separator | null = null
-  let bestCount = 1
   let fallback: Separator | null = null
   let fallbackCount = 1
   for (const sep of SEPARATORS) {
     const counts = probe.map((l) => splitLine(l.text, sep).length)
     const first = counts[0]
+    if (first >= 2 && counts.every((c) => c === first)) return sep
     if (first > fallbackCount) {
       fallback = sep
       fallbackCount = first
     }
-    if (first > bestCount && counts.every((c) => c === first)) {
-      best = sep
-      bestCount = first
-    }
   }
-  return best ?? fallback
+  return fallback
 }
 
 function headerNames(cells: (number | string | null)[]): string[] {

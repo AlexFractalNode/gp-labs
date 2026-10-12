@@ -64,6 +64,25 @@ describe('parseCsv', () => {
     ])
   })
 
+  it('splits headerless German decimal-comma data at ";" (priority over a consistent ",")', () => {
+    const t = parseCsv('1,5;2,0\n3,1;4,2\n5,0;6,5\n')
+    expect(t.columns).toEqual(['col1', 'col2'])
+    expect(t.rows).toEqual([
+      [1.5, 2],
+      [3.1, 4.2],
+      [5, 6.5],
+    ])
+  })
+
+  it('keeps quoted fields with spaces together in whitespace format', () => {
+    const t = parseCsv('x  "long name"  y\n1  "a b"  2\n3  c  4\n')
+    expect(t.columns).toEqual(['x', 'long name', 'y'])
+    expect(t.rows).toEqual([
+      [1, 'a b', 2],
+      [3, 'c', 4],
+    ])
+  })
+
   it('treats common missing-value markers as null and names empty or duplicate header cells', () => {
     const t = parseCsv(';a;a\n1;NA;?\n2;3;4\n')
     expect(t.columns).toEqual(['col1', 'a', 'a_2'])

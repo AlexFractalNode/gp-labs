@@ -3,13 +3,14 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { parseCsv, type Table } from '../../src/core/csv'
 import { GpError } from '../../src/core/errors'
-import { logMarginalLikelihoodFromFit, fitModel, type GpModel } from '../../src/core/gp'
-import { fromRows, toRows } from '../../src/core/linalg'
+import { fitModel, logMarginalLikelihoodFromFit, posterior, type GpModel } from '../../src/core/gp'
+import { fromRows, toRows, zeros } from '../../src/core/linalg'
 import { optimizeHyperparameters } from '../../src/core/optimize'
 import { createRng } from '../../src/core/rng'
 import {
   applyScaler,
   buildModel,
+  buildModelWithNotices,
   canLogTarget,
   evaluateRun,
   fitScaler,
@@ -104,6 +105,16 @@ describe('helpers', () => {
     expect(toRows(applyScaler(fromRows([[1, 4]]), s))).toEqual([[0, 0]])
   })
 
+  it('fitScaler treats a near-constant column (rounding sd ~1e-17) as constant', () => {
+    const s = fitScaler(fromRows([[0.1], [0.1], [0.1]]))
+    expect(s.scale[0]).toBe(1)
+    const z = applyScaler(fromRows([[0.1], [0.2]]), s).data
+    expect(z[0]).toBe(0)
+    expect(z[1]).toBeCloseTo(0.1, 12)
+    const s2 = fitScaler(fromRows([[1e6 + 0.1], [1e6 + 0.1 + 1e-10], [1e6 + 0.1]]))
+    expect(s2.scale[0]).toBe(1)
+  })
+
   it('splitIndices is a seeded partition with ceil(testFraction·n) test rows', () => {
     const a = splitIndices(50, 0.1, 7)
     const b = splitIndices(50, 0.1, 7)
@@ -156,6 +167,13 @@ describe('buildModel / templates', () => {
     )
     expect(e.code).toBe('InvalidInput')
     expect(e.details?.reason).toBe('whiteInProduct')
+  })
+
+  it('resets raw-unit location parameters of a Baukasten kernel and returns the notices once', () => {
+    const r = buildModelWithNotices({ terms: [[{ kind: 'linear', params: { sigma0: 1, c: 2 }, fixed: ['c'] }]] }, 3)
+    expect(r.model.kernel.terms[0][0].params).toEqual({ sigma0: 1, c: 0 })
+    expect(r.notices).toEqual(['locationReset'])
+    expect(buildModelWithNotices('rbf', 3).notices).toEqual([])
   })
 
   it('applies a Baukasten kernel isotropically and reports dropped settings', () => {
@@ -232,6 +250,82 @@ describe('evaluateRun', () => {
     const run = evaluateRun(cfg, { ...buildModel(linear, 1), sigmaN: 0.1 }, Number.NaN, [])
     expect(run.test.yPred.some((v) => v < 0)).toBe(true)
     expect(run.warnings).toContain('negativePredictions')
+  })
+})
+
+describe('evaluateRun details', () => {
+  /** A kernel with a negligible prior (σ = 1e-5): the GP mean is ≈ 0 and sdY ≈ sigma_n in model space. */
+  const flat: GpModel = { kernel: { terms: [[{ kind: 'rbf', params: { sigma: 1e-5, ell: 1 } }]] }, sigmaN: 1, mean: { kind: 'zero' } }
+
+  it('coverage2sd on a tiny case: band = yMean ± 2·yScale = [−1, 3]', () => {
+    const ys = [0, 2, 0, 2, 0, 2, 0, 2, 0, 2.9, 3.1, -1.5]
+    const rows = ys.map((y, i) => [i, y] as (number | string | null)[])
+    const ds = prepareDataset({ columns: ['x', 'y'], rows }, 'y', ['x'])
+    const split = { train: [0, 1, 2, 3, 4, 5, 6, 7], test: [8, 9, 10, 11] }
+    const cfg: RunConfig = { dataset: ds, split, logTarget: false, template: 'rbf', restarts: 0, seed: 0 }
+    const run = evaluateRun(cfg, flat, Number.NaN, [])
+    relClose(run.test.lowerY, [-1, -1, -1, -1], 1e-8)
+    relClose(run.test.upperY, [3, 3, 3, 3], 1e-8)
+    expect(run.metrics.coverage2sd).toBe(0.5)
+  })
+
+  it('log target: yPred = exp(m·yScale + yMean) and the bounds are exp of m ± 2·sdY', () => {
+    const ds = prepareDataset(synthTable(), 'y', ['x1', 'x2'])
+    const cfg: RunConfig = { dataset: ds, split: splitIndices(ds.X.rows, 0.2, 4), logTarget: true, template: 'rbf', restarts: 0, seed: 0 }
+    const model: GpModel = { ...buildModel('rbf', 2), sigmaN: 0.2 }
+    const run = evaluateRun(cfg, model, Number.NaN, [])
+    const p = prepareRun(cfg)
+    const post = posterior(model, p.Xtrain, p.ytrain, p.Xtest)
+    for (let i = 0; i < post.mean.length; i++) {
+      const m = post.mean[i]
+      const s = post.sdY[i]
+      expect(run.test.yPred[i]).toBeCloseTo(Math.exp(m * p.yScale + p.yMean), 12)
+      expect(run.test.lowerY[i]).toBeCloseTo(Math.exp((m - 2 * s) * p.yScale + p.yMean), 12)
+      expect(run.test.upperY[i]).toBeCloseTo(Math.exp((m + 2 * s) * p.yScale + p.yMean), 12)
+      // asymmetric: the upper half-band is wider than the lower one
+      expect(run.test.upperY[i] - run.test.yPred[i]).toBeGreaterThan(run.test.yPred[i] - run.test.lowerY[i])
+    }
+  })
+
+  it('sliceAt holds the other features at their training medians', () => {
+    const ds = prepareDataset(synthTable(), 'y', ['x1', 'x2'])
+    const cfg: RunConfig = { dataset: ds, split: splitIndices(ds.X.rows, 0.2, 5), logTarget: false, template: 'rbf', restarts: 0, seed: 0 }
+    const model: GpModel = { ...buildModel('rbf', 2), sigmaN: 0.1 }
+    const run = evaluateRun(cfg, model, Number.NaN, [])
+    const s = sliceAt(run, cfg, 0, 7)
+    const p = prepareRun(cfg)
+    const x2 = cfg.split.train.map((i) => ds.X.data[i * 2 + 1]).sort((a, b) => a - b)
+    const h = x2.length >> 1
+    const med = x2.length % 2 ? x2[h] : 0.5 * (x2[h - 1] + x2[h])
+    const grid = zeros(7, 2)
+    for (let i = 0; i < 7; i++) {
+      grid.data[2 * i] = s.x[i]
+      grid.data[2 * i + 1] = med
+    }
+    const post = posterior(model, p.Xtrain, p.ytrain, applyScaler(grid, p.xScaler))
+    relClose(s.mean, Array.from(post.mean, (m) => m * p.yScale + p.yMean), 1e-10)
+  })
+
+  it('a constant training y gives finite predictions', () => {
+    const rows = Array.from({ length: 12 }, (_, i) => [i, 0.1] as (number | string | null)[])
+    const ds = prepareDataset({ columns: ['x', 'y'], rows }, 'y', ['x'])
+    const cfg: RunConfig = { dataset: ds, split: { train: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], test: [10, 11] }, logTarget: false, template: 'rbf', restarts: 0, seed: 0 }
+    expect(prepareRun(cfg).yScale).toBe(1)
+    const run = evaluateRun(cfg, buildModel('rbf', 1), Number.NaN, [])
+    relClose(run.test.yPred, [0.1, 0.1], 1e-12)
+    for (const v of [...run.test.lowerY, ...run.test.upperY]) expect(Number.isFinite(v)).toBe(true)
+  })
+
+  it('warns above 2000 training rows (largeN)', () => {
+    const n = 2011
+    const rows = Array.from({ length: n }, (_, i) => [i / n, Math.sin(6 * (i / n))] as (number | string | null)[])
+    const ds = prepareDataset({ columns: ['x', 'y'], rows }, 'y', ['x'])
+    const test = [0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800]
+    const train = Array.from({ length: n }, (_, i) => i).filter((i) => !test.includes(i))
+    const cfg: RunConfig = { dataset: ds, split: { train, test }, logTarget: false, template: 'rbf', restarts: 0, seed: 0 }
+    const run = evaluateRun(cfg, buildModel('rbf', 1), Number.NaN, [])
+    expect(train.length).toBe(2001)
+    expect(run.warnings).toContain('largeN')
   })
 })
 

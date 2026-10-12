@@ -16,7 +16,15 @@ import { zeros, type Mat } from '../../core/linalg'
 import { calibration, coverage, r2, rmse } from '../../core/metrics'
 import { createRng } from '../../core/rng'
 import { NOTEBOOK_SPLIT } from './notebookSplit'
-import { clampSigmaN, DEFAULT_SIGMA_N, fromBaukasten, templateKernel, TEMPLATE_IDS, type TemplateId } from './templates'
+import {
+  clampSigmaN,
+  DEFAULT_SIGMA_N,
+  fromBaukasten,
+  templateKernel,
+  TEMPLATE_IDS,
+  type BaukastenNotice,
+  type TemplateId,
+} from './templates'
 
 export { NOTEBOOK_SPLIT }
 
@@ -158,7 +166,11 @@ export function splitIndices(n: number, testFraction: number, seed: number): { t
 
 // ---------------------------------------------------------------- scaling
 
-/** StandardScaler: column means and population std (ddof 0, like sklearn); a scale of 0 becomes 1. */
+/**
+ * StandardScaler: column means and population std (ddof 0, like sklearn). A constant column gets scale 1, also
+ * when rounding leaves a tiny sd (e.g. 3×0.1 → 1.4e-17): like sklearn's `_handle_zeros_in_scale`, scale 1 is used
+ * when all values equal the first or sd ≤ 10·ε·max(1, |mean|).
+ */
 export function fitScaler(X: Mat): Scaler {
   const { rows: n, cols: d } = X
   if (n === 0) throw new GpError('InvalidInput', { reason: 'noTrainingData' })
@@ -169,10 +181,17 @@ export function fitScaler(X: Mat): Scaler {
     for (let i = 0; i < n; i++) s += X.data[i * d + j]
     const m = s / n
     let v = 0
-    for (let i = 0; i < n; i++) v += (X.data[i * d + j] - m) ** 2
-    mean[j] = m
+    let constant = true
+    const first = X.data[j]
+    for (let i = 0; i < n; i++) {
+      const x = X.data[i * d + j]
+      v += (x - m) ** 2
+      if (x !== first) constant = false
+    }
+    mean[j] = constant ? first : m
     const sd = Math.sqrt(v / n)
-    scale[j] = sd > 0 && Number.isFinite(sd) ? sd : 1
+    const tiny = sd <= 10 * Number.EPSILON * Math.max(1, Math.abs(m))
+    scale[j] = constant || tiny || !Number.isFinite(sd) ? 1 : sd
   }
   return { mean, scale }
 }
@@ -263,23 +282,33 @@ function toModel(p: PreparedRun, y: number): number {
 // ---------------------------------------------------------------- model
 
 /**
- * GpModel (zero mean on standardised y) of a template or a Kernel-Baukasten spec for d features. Template
- * starting values are sklearn's defaults with sigma_n = 1. A Baukasten spec is applied isotropically
- * (`fromBaukasten`); its single-factor white terms become sigma_n (clamped to the sigma_n bounds).
+ * GpModel (zero mean on standardised y) of a template or a Kernel-Baukasten spec for d features, with the
+ * notices of the Baukasten adaptation (empty for templates). Template starting values are sklearn's defaults
+ * with sigma_n = 1. A Baukasten spec is applied isotropically (`fromBaukasten`); its single-factor white terms
+ * become sigma_n (clamped to the sigma_n bounds). The UI calls this once per run and shows the notices.
  * Throws GpError('InvalidInput') ('invalidSpec', 'whiteInProduct', 'onlyWhite', 'tooManyFeaturesForArd',
- * 'gibbsRequires1D', 'inputDim').
+ * 'gibbsRequires1D', 'inputDim', 'unknownTemplate').
  */
-export function buildModel(template: TemplateId | KernelSpec, d: number): GpModel {
+export function buildModelWithNotices(
+  template: TemplateId | KernelSpec,
+  d: number,
+): { model: GpModel; notices: BaukastenNotice[] } {
   if (!(Number.isInteger(d) && d >= 1)) throw new GpError('InvalidInput', { reason: 'inputDim', value: d })
   if (typeof template === 'string') {
     if (!TEMPLATE_IDS.includes(template)) throw new GpError('InvalidInput', { reason: 'unknownTemplate', template })
-    return { kernel: templateKernel(template, d), sigmaN: DEFAULT_SIGMA_N, mean: { kind: 'zero' } }
+    return { model: { kernel: templateKernel(template, d), sigmaN: DEFAULT_SIGMA_N, mean: { kind: 'zero' } }, notices: [] }
   }
-  const { spec, sigmaN } = fromBaukasten(template)
+  const { spec, sigmaN, notices } = fromBaukasten(template)
   if (d > 1 && spec.terms.some((t) => t.some((f) => f.kind === 'gibbs'))) {
     throw new GpError('InvalidInput', { reason: 'gibbsRequires1D', inputDim: d })
   }
-  return { kernel: spec, sigmaN: sigmaN === null ? DEFAULT_SIGMA_N : clampSigmaN(sigmaN), mean: { kind: 'zero' } }
+  const model: GpModel = { kernel: spec, sigmaN: sigmaN === null ? DEFAULT_SIGMA_N : clampSigmaN(sigmaN), mean: { kind: 'zero' } }
+  return { model, notices }
+}
+
+/** `buildModelWithNotices` without the notices. */
+export function buildModel(template: TemplateId | KernelSpec, d: number): GpModel {
+  return buildModelWithNotices(template, d).model
 }
 
 function templateLabel(template: TemplateId | KernelSpec): string {
@@ -382,8 +411,12 @@ export function sliceAt(
   const col = (j: number) => Array.from({ length: raw.rows }, (_, i) => raw.data[i * d + j])
   const centre = Array.from({ length: d }, (_, j) => median(col(j)))
   const xs = col(feature)
-  let lo = Math.min(...xs)
-  let hi = Math.max(...xs)
+  let lo = Infinity
+  let hi = -Infinity
+  for (const v of xs) {
+    if (v < lo) lo = v
+    if (v > hi) hi = v
+  }
   if (lo === hi) {
     lo -= 0.5
     hi += 0.5

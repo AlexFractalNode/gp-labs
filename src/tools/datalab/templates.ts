@@ -47,12 +47,13 @@ export function templateKernel(id: TemplateId, d: number): KernelSpec {
   throw new GpError('InvalidInput', { reason: 'unknownTemplate', template: id })
 }
 
-export type BaukastenNotice = 'ardDropped' | 'activeDimsDropped' | 'warpDropped' | 'whiteToNoise'
+export type BaukastenNotice = 'ardDropped' | 'activeDimsDropped' | 'warpDropped' | 'locationReset' | 'whiteToNoise'
 
 /**
  * Adapts a Kernel-Baukasten spec for d-dimensional (standardised) data: every factor is made isotropic with one
  * shared ℓ (ARD lengths → their geometric mean), activeDims and input warps are dropped (warps act on the raw
- * 1D axis of the Baukasten and are meaningless on standardised features), and single-factor `white` terms
+ * 1D axis of the Baukasten and are meaningless on standardised features), raw-unit location parameters are reset
+ * to 0 (linear/polynomial `c`, gibbs `x0`; standardised features are centred at 0), and single-factor `white` terms
  * become the observation noise: sigmaN = sqrt(Σ σ²) over those terms (null if there are none).
  * Throws GpError('InvalidInput') for an invalid spec ('invalidSpec'), `white` inside a product
  * ('whiteInProduct') or a spec that consists of white terms only ('onlyWhite').
@@ -77,6 +78,13 @@ export function fromBaukasten(spec: KernelSpec): { spec: KernelSpec; sigmaN: num
   return { spec: { terms }, sigmaN: hasWhite ? Math.sqrt(whiteVar) : null, notices: [...notices] }
 }
 
+/** Location parameters in raw input units that are reset to 0 for standardised features. */
+const LOCATION_KEYS: Partial<Record<BaseKernel['kind'], readonly string[]>> = {
+  linear: ['c'],
+  polynomial: ['c'],
+  gibbs: ['x0'],
+}
+
 function isotropic(f: BaseKernel, notices: Set<BaukastenNotice>): BaseKernel {
   const params: Record<string, number> = {}
   let fixed = f.fixed ? [...f.fixed] : undefined
@@ -95,6 +103,12 @@ function isotropic(f: BaseKernel, notices: Set<BaukastenNotice>): BaseKernel {
       if (ellFixed) fixed.push('ell')
     }
   } else Object.assign(params, f.params)
+  for (const key of LOCATION_KEYS[f.kind] ?? []) {
+    if (params[key] !== 0) {
+      params[key] = 0
+      notices.add('locationReset')
+    }
+  }
   if (f.activeDims) notices.add('activeDimsDropped')
   if (f.warp && f.warp.kind !== 'identity') notices.add('warpDropped')
   const out: BaseKernel = { kind: f.kind, params }
