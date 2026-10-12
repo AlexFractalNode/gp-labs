@@ -104,8 +104,20 @@ def test_kernels_numpy_matches_sklearn_where_both_exist():
 
 def test_kernel_matrices_are_symmetric():
     g = load("kernels")
-    assert len(g["entries"]) == 14
+    assert len(g["entries"]) == 18
     for e in g["entries"]:
         K = np.asarray(e["K"])
-        assert K.shape == (7, 7)
+        n = len(e.get("x", g["x"]))
+        assert K.shape == (n, n)
         assert np.allclose(K, K.T), e["name"]
+
+
+def test_kernel_extra_entries_present():
+    g = load("kernels")
+    by_name = {e["name"]: e for e in g["entries"]}
+    assert by_name["Periodic"]["source"] == "sklearn"
+    for name in ("RBF-TanhWarp", "RBF-CircleWarp", "Gibbs-Fine"):
+        assert by_name[name]["source"] == "numpy-transcription", name
+    assert len(by_name["Gibbs-Fine"]["x"]) == 25
+    names = [n for n, _, _ in make_golden.kernel_crosschecks()]
+    assert "RBF-CircleWarp vs ExpSineSquared" in names

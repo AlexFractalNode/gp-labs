@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { KERNEL_PARAM, buildHash, decodeKernel, encodeKernel, parseHash, urlProblems } from '../../src/urlState'
+import {
+  KERNEL_PARAM,
+  buildHash,
+  decodeKernel,
+  encodeKernel,
+  parseHash,
+  urlProblems,
+  type KernelSpec,
+} from '../../src/urlState'
 import { useNotices, notify, dismissNotice } from '../../src/notify'
 
 describe('parseHash', () => {
@@ -30,11 +38,24 @@ describe('buildHash', () => {
 })
 
 describe('kernel codec', () => {
-  it('round-trips incl. non-ASCII', () => {
-    const spec = { terms: [[{ name: 'ℓ', v: 1 }]] }
+  it('round-trips a valid spec', () => {
+    const spec: KernelSpec = {
+      terms: [[{ kind: 'rbf', params: { sigma: 1.5, ell: 0.2 } }, { kind: 'periodic', params: { sigma: 1, ell: 1, period: 0.5 } }]],
+    }
     const s = encodeKernel(spec)
     expect(s).toMatch(/^[A-Za-z0-9_-]+$/)
     expect(decodeKernel(s)).toEqual(spec)
+  })
+  it('decodes non-ASCII payloads without throwing and rejects them as invalid specs', () => {
+    const s = encodeKernel({ terms: [[{ kind: 'ℓ', params: {} }]] } as unknown as KernelSpec)
+    expect(s).toMatch(/^[A-Za-z0-9_-]+$/)
+    expect(decodeKernel(s)).toBeNull()
+  })
+  it('rejects corrupt kernel parameters (Review Focus 5)', () => {
+    for (const params of [{ sigma: 1, ell: -1 }, { sigma: 1 }, { sigma: 1, ell: null }]) {
+      expect(decodeKernel(encodeKernel({ terms: [[{ kind: 'rbf', params }]] } as unknown as KernelSpec))).toBeNull()
+    }
+    expect(decodeKernel(btoa('{"terms":[[{"kind":"rbf","params":{"sigma":1,"ell":NaN}}]]}'))).toBeNull()
   })
   it('returns null on garbage or invalid shape', () => {
     expect(decodeKernel('%%%')).toBeNull()
@@ -74,7 +95,7 @@ describe('urlProblems', () => {
     ])
   })
   it('accepts valid URLs', () => {
-    const h = buildHash('playground', { [KERNEL_PARAM]: encodeKernel({ terms: [[]] }) })
+    const h = buildHash('playground', { [KERNEL_PARAM]: encodeKernel({ terms: [[{ kind: 'rbf', params: { sigma: 1, ell: 1 } }]] }) })
     expect(urlProblems(parseHash(h))).toEqual([])
     expect(urlProblems(parseHash('#/kernels'))).toEqual([])
   })

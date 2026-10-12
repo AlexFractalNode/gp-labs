@@ -221,8 +221,27 @@ def sk_kernel(kind, p):
     return None
 
 
-def factor(kind, params, fixed=()):
-    return {"kind": kind, "params": params, "fixed": list(fixed)}
+def factor(kind, params, fixed=(), warp=None):
+    f = {"kind": kind, "params": params, "fixed": list(fixed)}
+    if warp is not None:
+        f["warp"] = warp
+    return f
+
+
+def warp_input(warp, x):
+    """Input warp (Notebook Code 64/65). Returns an (n, d) array; circle maps 1-D to 2-D."""
+    if warp["kind"] == "tanh":
+        return (1.0 + x + warp["a"] * np.tanh(warp["b"] * (x - warp["c"])))[:, None]
+    if warp["kind"] == "circle":
+        c = 2.0 * np.pi / warp["period"]
+        return np.column_stack([np.sin(c * x), np.cos(c * x)])
+    raise ValueError(warp["kind"])
+
+
+def np_warped_rbf(p, u, v):
+    """rbf on (possibly multi-dimensional) warped inputs with Euclidean distance."""
+    d2 = ((u[:, None, :] - v[None, :, :]) ** 2).sum(-1)
+    return p["sigma"] ** 2 * np.exp(-d2 / (2 * p["ell"] ** 2))
 
 
 # (name, terms) with terms = sum of products of factors
@@ -243,6 +262,17 @@ KERNEL_ENTRIES = [
                          [factor("periodic", {"sigma": 1.0, "ell": 1.0, "period": 0.5})]]),
     ("RBF*Periodic", [[factor("rbf", {"sigma": 1.0, "ell": 1.0}),
                        factor("periodic", {"sigma": 1.0, "ell": 1.0, "period": 0.5})]]),
+    ("Periodic", [[factor("periodic", {"sigma": 1.0, "ell": 1.0, "period": 1.0})]]),
+    ("RBF-TanhWarp", [[factor("rbf", {"sigma": 1.0, "ell": 0.2}, warp={"kind": "tanh", "a": 1.0, "b": 5.0, "c": 1.0})]]),
+    ("RBF-CircleWarp", [[factor("rbf", {"sigma": 1.0, "ell": 0.4}, warp={"kind": "circle", "period": 0.5})]]),
+]
+
+# Entries evaluated on their own grid (stored as entry["x"]); e.g. Gibbs needs a finer grid so that the
+# interpolation of l(x) between l1 and l2 around x0 is actually exercised.
+FINE_GRID = np.linspace(0, 2, 25)
+KERNEL_ENTRIES_OWN_GRID = [
+    ("Gibbs-Fine", FINE_GRID,
+     [[factor("gibbs", {"sigma": 1.0, "l1": 0.05, "l2": 0.6, "w": 0.3, "x0": 1.0}, ["x0"])]]),
 ]
 
 
@@ -253,6 +283,12 @@ def _terms_matrix(terms, x, z, same, use_sklearn):
     for term in terms:
         prod = np.ones((len(x), len(z)))
         for f in term:
+            if "warp" in f:
+                # Warped inputs: NumPy transcription only (rbf is the only warped kind in the golden set).
+                assert f["kind"] == "rbf"
+                all_sk = False
+                prod = prod * np_warped_rbf(f["params"], warp_input(f["warp"], x), warp_input(f["warp"], z))
+                continue
             sk = sk_kernel(f["kind"], f["params"])
             all_sk = all_sk and sk is not None
             if use_sklearn and sk is not None:
@@ -272,6 +308,12 @@ def build_kernels():
             "name": name, "spec": {"terms": terms}, "K": lst(K),
             "source": "sklearn" if all_sk else "numpy-transcription",
         })
+    for name, grid, terms in KERNEL_ENTRIES_OWN_GRID:
+        K, all_sk = _terms_matrix(terms, grid, grid, True, True)
+        entries.append({
+            "name": name, "x": lst(grid), "spec": {"terms": terms}, "K": lst(K),
+            "source": "sklearn" if all_sk else "numpy-transcription",
+        })
     return {"meta": META, "x": lst(GRID), "entries": entries}
 
 
@@ -283,6 +325,16 @@ def kernel_crosschecks():
         if all_sk:
             k_np, _ = _terms_matrix(terms, GRID, GRID, True, False)
             pairs.append((name, k_np, k_sk))
+    # Circle-warped rbf with length scale l_w equals the periodic kernel with l_p = l_w / 2 (Notebook Code 66),
+    # i.e. sklearn ExpSineSquared(length_scale=l_w, periodicity=T) times sigma^2.
+    for name, terms in KERNEL_ENTRIES:
+        f = terms[0][0]
+        if len(terms) == 1 and len(terms[0]) == 1 and f.get("warp", {}).get("kind") == "circle":
+            k_np, _ = _terms_matrix(terms, GRID, GRID, True, False)
+            p, T = f["params"], f["warp"]["period"]
+            sk = ConstantKernel(p["sigma"] ** 2, constant_value_bounds="fixed") * ExpSineSquared(
+                p["ell"], T, length_scale_bounds="fixed", periodicity_bounds="fixed")
+            pairs.append((name + " vs ExpSineSquared", k_np, sk(GRID[:, None])))
     return pairs
 
 

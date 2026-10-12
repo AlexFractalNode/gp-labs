@@ -1,4 +1,7 @@
+import { isKernelSpec, type KernelSpec } from './core/kernels'
 import type { MessageKey } from './i18n'
+
+export { isKernelSpec, type KernelSpec }
 
 export type Route = 'home' | 'playground' | 'kernels' | 'datalab'
 
@@ -25,17 +28,6 @@ export function buildHash(route: Route, params?: Record<string, string>): string
   const path = route === 'home' ? '#/' : `#/${route}`
   const qs = params ? new URLSearchParams(params).toString() : ''
   return qs ? `${path}?${qs}` : path
-}
-
-// Placeholder: Task 5 replaces KernelSpec and isKernelSpec with imports from core/kernels.ts.
-export interface KernelSpec {
-  terms: unknown[][]
-}
-
-export function isKernelSpec(x: unknown): x is KernelSpec {
-  if (x === null || typeof x !== 'object') return false
-  const terms = (x as { terms?: unknown }).terms
-  return Array.isArray(terms) && terms.every((t) => Array.isArray(t))
 }
 
 function toBase64Url(s: string): string {
