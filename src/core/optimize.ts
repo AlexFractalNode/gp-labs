@@ -1,0 +1,246 @@
+/**
+ * Hyperparameter optimisation (Lehrbuch Kap. 10.5): maximise the log marginal likelihood over the
+ * log-parameters of `modelParams` by minimising f = −log ML with a bounded (projected) L-BFGS and multistarts.
+ */
+import { GpError } from './errors'
+import { logMarginalLikelihood, modelParams, withModelLogParams, type GpModel } from './gp'
+import type { Mat } from './linalg'
+import { createRng } from './rng'
+
+export interface OptResult {
+  x: Float64Array
+  value: number
+  iterations: number
+  converged: boolean
+}
+
+export type Objective = (x: Float64Array) => { value: number; grad: Float64Array }
+
+/** Armijo sufficient-decrease constant. */
+const C1 = 1e-4
+/** Maximum number of step halvings per line search. */
+const MAX_BACKTRACK = 50
+/** Curvature pairs with sᵀy at or below this are skipped. */
+const MIN_CURVATURE = 1e-10
+/** Parameters closer than this (log units) to a bound are reported in `atBound`. */
+const AT_BOUND_TOL = 1e-3
+/** Random starts are drawn within ±START_SPREAD log units of the current values (clipped to the bounds). */
+const START_SPREAD = 3
+
+function clampInto(v: number, lo: number, hi: number): number {
+  if (Number.isNaN(v)) {
+    if (Number.isFinite(lo) && Number.isFinite(hi)) return 0.5 * (lo + hi)
+    return Number.isFinite(lo) ? lo : Number.isFinite(hi) ? hi : 0
+  }
+  return Math.min(hi, Math.max(lo, v))
+}
+
+function dot(a: Float64Array, b: Float64Array): number {
+  let s = 0
+  for (let i = 0; i < a.length; i++) s += a[i] * b[i]
+  return s
+}
+
+/**
+ * Evaluates f; a non-finite value, a non-finite gradient or a thrown GpError (e.g. NotPositiveDefinite)
+ * count as +Infinity so the line search shrinks the step. Other errors propagate.
+ */
+function safeEval(f: Objective, x: Float64Array): { value: number; grad: Float64Array } {
+  try {
+    const r = f(x)
+    if (!Number.isFinite(r.value) || r.grad.length !== x.length || !r.grad.every(Number.isFinite)) {
+      return { value: Infinity, grad: r.grad }
+    }
+    return r
+  } catch (e) {
+    if (e instanceof GpError) return { value: Infinity, grad: new Float64Array(x.length) }
+    throw e
+  }
+}
+
+/**
+ * Projected L-BFGS with Armijo backtracking on the box [lower, upper].
+ * Iterates are clamped to the bounds; variables at a bound whose gradient points outward are held fixed
+ * (their search direction is zero) and the history is reset whenever this active set changes.
+ * Converged when the projected-gradient max-norm ‖P(x − g) − x‖∞ < tol.
+ */
+export function lbfgsb(
+  f: Objective,
+  x0: Float64Array,
+  lower: Float64Array,
+  upper: Float64Array,
+  opts?: { maxIter?: number; m?: number; tol?: number },
+): OptResult {
+  const maxIter = opts?.maxIter ?? 200
+  const m = opts?.m ?? 7
+  const tol = opts?.tol ?? 1e-6
+  const n = x0.length
+  if (lower.length !== n || upper.length !== n) {
+    throw new GpError('InvalidInput', { reason: 'boundsLength', n, lower: lower.length, upper: upper.length })
+  }
+  for (let i = 0; i < n; i++) {
+    if (!(lower[i] <= upper[i])) throw new GpError('InvalidInput', { reason: 'bounds', index: i })
+  }
+
+  let x: Float64Array = Float64Array.from(x0, (v, i) => clampInto(v, lower[i], upper[i]))
+  let cur = safeEval(f, x)
+  if (!Number.isFinite(cur.value)) return { x, value: Infinity, iterations: 0, converged: false }
+
+  const S: Float64Array[] = []
+  const Y: Float64Array[] = []
+  const RHO: number[] = []
+  let prevActive = ''
+  let iter = 0
+
+  while (iter < maxIter) {
+    const g = cur.grad
+    // Projected gradient and active set.
+    let pgNorm = 0
+    const active = new Uint8Array(n)
+    for (let i = 0; i < n; i++) {
+      const p = clampInto(x[i] - g[i], lower[i], upper[i]) - x[i]
+      pgNorm = Math.max(pgNorm, Math.abs(p))
+      if ((x[i] <= lower[i] && g[i] > 0) || (x[i] >= upper[i] && g[i] < 0)) active[i] = 1
+    }
+    if (pgNorm < tol) return { x, value: cur.value, iterations: iter, converged: true }
+    const activeKey = active.join('')
+    if (activeKey !== prevActive) {
+      S.length = 0
+      Y.length = 0
+      RHO.length = 0
+      prevActive = activeKey
+    }
+
+    // Two-loop recursion on the free variables.
+    const q = Float64Array.from(g, (v, i) => (active[i] ? 0 : v))
+    const alphas = new Array<number>(S.length)
+    for (let k = S.length - 1; k >= 0; k--) {
+      alphas[k] = RHO[k] * dot(S[k], q)
+      for (let i = 0; i < n; i++) q[i] -= alphas[k] * Y[k][i]
+    }
+    const k0 = S.length - 1
+    const gamma = k0 >= 0 ? dot(S[k0], Y[k0]) / dot(Y[k0], Y[k0]) : 1
+    for (let i = 0; i < n; i++) q[i] *= gamma
+    for (let k = 0; k < S.length; k++) {
+      const beta = RHO[k] * dot(Y[k], q)
+      for (let i = 0; i < n; i++) q[i] += S[k][i] * (alphas[k] - beta)
+    }
+    let d = Float64Array.from(q, (v, i) => (active[i] ? 0 : -v))
+    let slope = dot(g, d)
+    if (!(slope < 0)) {
+      // Not a descent direction: fall back to steepest descent and drop the history.
+      S.length = 0
+      Y.length = 0
+      RHO.length = 0
+      d = Float64Array.from(g, (v, i) => (active[i] ? 0 : -v))
+      slope = dot(g, d)
+      if (!(slope < 0)) return { x, value: cur.value, iterations: iter, converged: false }
+    }
+
+    // Initial step: 1 with curvature information, otherwise a unit-length step in the max-norm.
+    let t = S.length > 0 ? 1 : Math.min(1, 1 / d.reduce((a, v) => Math.max(a, Math.abs(v)), 0))
+    let accepted: { x: Float64Array; value: number; grad: Float64Array } | null = null
+    for (let bt = 0; bt < MAX_BACKTRACK; bt++) {
+      const xn = Float64Array.from(x, (v, i) => clampInto(v + t * d[i], lower[i], upper[i]))
+      let decrease = 0
+      for (let i = 0; i < n; i++) decrease += g[i] * (xn[i] - x[i])
+      if (decrease < 0) {
+        const r = safeEval(f, xn)
+        if (Number.isFinite(r.value) && r.value <= cur.value + C1 * decrease) {
+          accepted = { x: xn, value: r.value, grad: r.grad }
+          break
+        }
+      }
+      t *= 0.5
+    }
+    iter++
+    if (!accepted) return { x, value: cur.value, iterations: iter, converged: false }
+
+    const s = Float64Array.from(accepted.x, (v, i) => v - x[i])
+    const yv = Float64Array.from(accepted.grad, (v, i) => v - g[i])
+    const sy = dot(s, yv)
+    if (sy > MIN_CURVATURE) {
+      S.push(s)
+      Y.push(yv)
+      RHO.push(1 / sy)
+      if (S.length > m) {
+        S.shift()
+        Y.shift()
+        RHO.shift()
+      }
+    }
+    x = accepted.x
+    cur = accepted
+  }
+  return { x, value: cur.value, iterations: iter, converged: false }
+}
+
+function validateData(X: Mat, y: Float64Array): void {
+  if (X.rows === 0) throw new GpError('InvalidInput', { reason: 'noTrainingData' })
+  if (X.rows !== y.length) throw new GpError('InvalidInput', { reason: 'yLength', rows: X.rows, y: y.length })
+  for (let i = 0; i < X.data.length; i++) {
+    if (!Number.isFinite(X.data[i])) throw new GpError('InvalidInput', { reason: 'xNonFinite', index: i })
+  }
+  for (let i = 0; i < y.length; i++) {
+    if (!Number.isFinite(y[i])) throw new GpError('InvalidInput', { reason: 'yNonFinite', index: i })
+  }
+}
+
+/**
+ * Multistart maximisation of the log marginal likelihood. Run 0 starts at the current parameters (clamped into
+ * the bounds); runs 1…restarts start uniformly in the log-bounds clipped to ±3 log units around them (sklearn's
+ * n_restarts_optimizer convention: restarts + 1 runs in total). `shouldStop` is checked before every run after
+ * the first. Throws GpError('OptimizerFailed') if no run reaches a finite value.
+ */
+export function optimizeHyperparameters(
+  model: GpModel,
+  X: Mat,
+  y: Float64Array,
+  opts: {
+    restarts: number
+    seed: number
+    maxIter?: number
+    onProgress?: (p: { restart: number; logML: number }) => void
+    shouldStop?: () => boolean
+  },
+): { model: GpModel; logML: number; runs: OptResult[]; atBound: string[] } {
+  validateData(X, y)
+  if (!(opts.restarts >= 0) || !Number.isInteger(opts.restarts)) {
+    throw new GpError('InvalidInput', { reason: 'restarts', value: opts.restarts })
+  }
+  const d = X.cols
+  const info = modelParams(model, d)
+  const { logLower: lo, logUpper: hi } = info
+  const center = Float64Array.from(info.logValues, (v, i) => clampInto(v, lo[i], hi[i]))
+  const rng = createRng(opts.seed)
+
+  const objective: Objective = (theta) => {
+    const r = logMarginalLikelihood(withModelLogParams(model, d, theta), X, y)
+    return { value: -r.value, grad: r.grad.map((v) => -v) }
+  }
+
+  const runs: OptResult[] = []
+  let best: OptResult | null = null
+  for (let r = 0; r <= opts.restarts; r++) {
+    if (r > 0 && opts.shouldStop?.()) break
+    const start =
+      r === 0
+        ? center
+        : Float64Array.from(center, (c, i) => {
+            const a = Math.max(lo[i], c - START_SPREAD)
+            const b = Math.min(hi[i], c + START_SPREAD)
+            return a + (b - a) * rng.uniform()
+          })
+    const res = lbfgsb(objective, start, lo, hi, { maxIter: opts.maxIter ?? 200 })
+    runs.push(res)
+    if (Number.isFinite(res.value) && (best === null || res.value < best.value)) best = res
+    opts.onProgress?.({ restart: r, logML: best ? -best.value : -Infinity })
+  }
+
+  if (best === null) throw new GpError('OptimizerFailed', { reason: 'noFiniteRun', runs: runs.length })
+  const bestX = best.x
+  const atBound = info.names.filter(
+    (_, i) => bestX[i] - lo[i] < AT_BOUND_TOL || hi[i] - bestX[i] < AT_BOUND_TOL,
+  )
+  return { model: withModelLogParams(model, d, bestX), logML: -best.value, runs, atBound }
+}
