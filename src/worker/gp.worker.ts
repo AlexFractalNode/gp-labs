@@ -20,7 +20,7 @@ scope.onmessage = (ev: MessageEvent<WorkerRequest>) => {
       maxIter: job.maxIter,
       onProgress: (p) => post({ type: 'progress', runId, ...p }),
     })
-    post({ type: 'done', runId, model: res.model, logML: res.logML, atBound: res.atBound })
+    post({ type: 'done', runId, model: res.model, logML: res.logML, atBound: res.atBound, converged: res.converged })
   } catch (e) {
     if (e instanceof GpError) {
       post({ type: 'error', runId, code: e.code, details: e.details, message: e.message })

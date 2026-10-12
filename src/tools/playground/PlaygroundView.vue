@@ -422,7 +422,7 @@ function switchHyper(name: string) {
 
 // ------------------------------------------------------------------ optimiser
 
-const opt = reactive({ running: false, run: 0, atBound: [] as string[] })
+const opt = reactive({ running: false, run: 0, atBound: [] as string[], notConverged: false })
 let handle: OptimizeHandle | null = null
 let tween: TweenHandle | null = null
 
@@ -471,12 +471,14 @@ function optimize() {
   opt.running = true
   opt.run = 0
   opt.atBound = []
+  opt.notConverged = false
   h.result.then(
     (res) => {
       if (handle !== h) return
       handle = null
       opt.running = false
       opt.atBound = res.atBound
+      opt.notConverged = !res.converged
       tweenTo(res.model)
     },
     (e: unknown) => {
@@ -773,6 +775,9 @@ const meanLabel = (k: MeanKind): MessageKey => `playground.meanKind.${k}` as Mes
             <span v-else-if="opt.atBound.length" class="muted">
               {{ t('playground.atBound', { names: opt.atBound.join(', ') }) }}
             </span>
+            <span v-if="!opt.running && opt.notConverged" class="muted" role="status" data-note="not-converged">
+              {{ t('playground.notConverged') }}
+            </span>
           </div>
         </section>
 
@@ -853,7 +858,7 @@ const meanLabel = (k: MeanKind): MessageKey => `playground.meanKind.${k}` as Mes
             <label>{{ t('playground.meanB') }} <input v-model.number="meanB" type="number" step="0.1" :lang="lang" /></label>
           </div>
           <template v-else-if="isGls">
-            <p class="muted small">{{ t('playground.glsNote') }}</p>
+            <p class="muted small" data-note="gls-plug-in">{{ t('playground.glsNote') }}</p>
             <p v-if="etaText" class="tabular small">{{ t('playground.eta', { eta: etaText }) }}</p>
           </template>
         </section>

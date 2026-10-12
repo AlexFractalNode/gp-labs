@@ -336,17 +336,33 @@ onBeforeUnmount(() => {
   client = null
 })
 
-// ------------------------------------------------------------------ playground hand-over
+// ------------------------------------------------------------------ hand-over (Playground, Daten-Lab)
 
-const playgroundBlocked = computed<MessageKey | null>(() => {
-  if (is2D.value) return 'kernels.playground.disabled2d'
+/** Reason why the current kernel cannot be transferred yet: check still pending (debounce) or kernel invalid. */
+const validityBlocked = computed<MessageKey | null>(() => {
   const v = verdict.value
-  if (v && v.spec === spec.value && (!v.valid || v.error)) return 'kernels.playground.disabledInvalid'
+  if (!v || v.spec !== spec.value) return 'kernels.transfer.pending'
+  if (!v.valid || v.error) return 'kernels.playground.disabledInvalid'
   return null
 })
+/** The Playground is 1D; the Daten-Lab also takes 2D kernels (it makes ARD / activeDims isotropic, Spec §6). */
+const playgroundBlocked = computed<MessageKey | null>(() =>
+  is2D.value ? 'kernels.playground.disabled2d' : validityBlocked.value,
+)
+const datalabBlocked = computed<MessageKey | null>(() => validityBlocked.value)
+/** Distinct reasons, each shown once; a button points at its reason via aria-describedby. */
+const blockedReasons = computed(() => [
+  ...new Set([playgroundBlocked.value, datalabBlocked.value].filter((r): r is MessageKey => r !== null)),
+])
+const reasonId = (r: MessageKey | null) => (r ? `transfer-blocked-${blockedReasons.value.indexOf(r)}` : undefined)
+
 function usePlayground() {
   if (playgroundBlocked.value) return
   window.location.hash = buildHash('playground', { kernel: encodeKernel(spec.value) })
+}
+function useDatalab() {
+  if (datalabBlocked.value) return
+  window.location.hash = buildHash('datalab', { kernel: encodeKernel(spec.value) })
 }
 
 // ------------------------------------------------------------------ display
@@ -590,17 +606,37 @@ const x0bStep = computed(() => (domain2.value[1] - domain2.value[0]) / 200)
           <KernelBuilder :spec="spec" :input-dim="inputDim" @update:spec="spec = $event" />
         </section>
         <section class="panel handover">
-          <button
-            type="button"
-            class="btn primary"
-            :disabled="playgroundBlocked !== null"
-            :aria-describedby="playgroundBlocked ? 'playground-blocked' : undefined"
-            data-action="use-in-playground"
-            @click="usePlayground"
+          <div class="handover-buttons">
+            <button
+              type="button"
+              class="btn primary"
+              :disabled="playgroundBlocked !== null"
+              :aria-describedby="reasonId(playgroundBlocked)"
+              data-action="use-in-playground"
+              @click="usePlayground"
+            >
+              {{ t('kernels.playground.use') }}
+            </button>
+            <button
+              type="button"
+              class="btn"
+              :disabled="datalabBlocked !== null"
+              :aria-describedby="reasonId(datalabBlocked)"
+              data-action="use-in-datalab"
+              @click="useDatalab"
+            >
+              {{ t('kernels.transfer.useDatalab') }}
+            </button>
+          </div>
+          <p
+            v-for="(r, i) in blockedReasons"
+            :id="`transfer-blocked-${i}`"
+            :key="r"
+            class="muted small"
+            :data-blocked-reason="r"
           >
-            {{ t('kernels.playground.use') }}
-          </button>
-          <p v-if="playgroundBlocked" id="playground-blocked" class="muted small">{{ t(playgroundBlocked) }}</p>
+            {{ t(r) }}
+          </p>
         </section>
       </aside>
     </div>
@@ -863,6 +899,11 @@ h3.no-caps {
 }
 .handover {
   display: grid;
+  gap: 0.4rem;
+}
+.handover-buttons {
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.4rem;
 }
 .btn {

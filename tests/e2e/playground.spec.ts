@@ -114,5 +114,7 @@ test('GLS mean with too few points: prior shown, optimise disabled with a reason
   await expect(btn).toBeDisabled()
   await expect(btn).toHaveAttribute('aria-describedby', 'optimize-blocked')
   await expect(page.locator('#optimize-blocked')).toBeVisible()
+  // Plug-in note under the GLS options: the band does not contain the uncertainty of the estimated η̂.
+  await expect(page.locator('[data-note="gls-plug-in"]')).toBeVisible()
   expect(errors).toEqual([])
 })

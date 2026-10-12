@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { useRoute } from './router'
-import { useI18n, setLang, type MessageKey } from './i18n'
+import { useI18n, toggleLang, type MessageKey } from './i18n'
 import { dismissNotice, notify, useNotices } from './notify'
 import { buildHash, urlProblems, type Route } from './urlState'
 import HomeView from './tools/home/HomeView.vue'
@@ -39,10 +39,6 @@ watch(
   },
   { immediate: true },
 )
-
-function toggleLang() {
-  setLang(lang.value === 'de' ? 'en' : 'de')
-}
 </script>
 
 <template>

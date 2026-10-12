@@ -17,18 +17,35 @@ function isLang(x: unknown): x is Lang {
   return x === 'de' || x === 'en'
 }
 
-/** Language from ?lang= (hash query or search), then localStorage, then 'de'. */
-function initialLang(): Lang {
+function store(l: Lang): void {
   try {
-    if (typeof window !== 'undefined') {
-      const hashQuery = window.location.hash.split('?')[1] ?? ''
-      const fromHash = new URLSearchParams(hashQuery).get('lang')
-      if (isLang(fromHash)) return fromHash
-      const fromSearch = new URLSearchParams(window.location.search).get('lang')
-      if (isLang(fromSearch)) return fromSearch
-    }
+    localStorage.setItem(STORAGE_KEY, l)
+  } catch {
+    /* localStorage unavailable */
+  }
+}
+
+/** ?lang= from the hash query or the search part, or null. */
+function langFromUrl(): Lang | null {
+  try {
+    if (typeof window === 'undefined') return null
+    const hashQuery = window.location.hash.split('?')[1] ?? ''
+    const fromHash = new URLSearchParams(hashQuery).get('lang')
+    if (isLang(fromHash)) return fromHash
+    const fromSearch = new URLSearchParams(window.location.search).get('lang')
+    if (isLang(fromSearch)) return fromSearch
   } catch {
     /* location unavailable */
+  }
+  return null
+}
+
+/** Language from ?lang= (hash query or search; persisted, so it sticks), then localStorage, then 'de'. */
+function initialLang(): Lang {
+  const fromUrl = langFromUrl()
+  if (fromUrl) {
+    store(fromUrl)
+    return fromUrl
   }
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
@@ -43,10 +60,27 @@ const lang: Ref<Lang> = ref(initialLang())
 
 export function setLang(next: Lang): void {
   lang.value = next
+  store(next)
+}
+
+/**
+ * Switches DE ↔ EN and writes `lang` into the query of the live hash (replaceState: no hashchange, no history
+ * entry), so a copied link opens in the same language. The router state is not touched; views that rewrite the
+ * hash read the live location and keep the parameter.
+ */
+export function toggleLang(): void {
+  const next: Lang = lang.value === 'de' ? 'en' : 'de'
+  setLang(next)
   try {
-    localStorage.setItem(STORAGE_KEY, next)
+    if (typeof window === 'undefined') return
+    const body = window.location.hash.replace(/^#/, '')
+    const q = body.indexOf('?')
+    const path = (q >= 0 ? body.slice(0, q) : body) || '/'
+    const params = new URLSearchParams(q >= 0 ? body.slice(q + 1) : '')
+    params.set('lang', next)
+    history.replaceState(history.state, '', `#${path}?${params.toString()}`)
   } catch {
-    /* localStorage unavailable */
+    /* history unavailable: the language still switches */
   }
 }
 

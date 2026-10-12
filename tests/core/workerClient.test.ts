@@ -60,11 +60,11 @@ describe('worker client', () => {
     expect(workers[1].posted[0]).toMatchObject({ type: 'optimize', runId: b.runId })
 
     // Stale messages for A arrive (on the old and on the new worker) before B's result.
-    workers[0].emit({ type: 'done', runId: a.runId, model: model(9), logML: 99, atBound: [] })
+    workers[0].emit({ type: 'done', runId: a.runId, model: model(9), logML: 99, atBound: [], converged: true })
     workers[1].emit({ type: 'progress', runId: a.runId, restart: 0, logML: 98 })
-    workers[1].emit({ type: 'done', runId: a.runId, model: model(9), logML: 99, atBound: [] })
+    workers[1].emit({ type: 'done', runId: a.runId, model: model(9), logML: 99, atBound: [], converged: true })
     workers[1].emit({ type: 'progress', runId: b.runId, restart: 0, logML: -5 })
-    workers[1].emit({ type: 'done', runId: b.runId, model: model(3), logML: -4, atBound: ['sigmaN'] })
+    workers[1].emit({ type: 'done', runId: b.runId, model: model(3), logML: -4, atBound: ['sigmaN'], converged: true })
 
     const resB = await b.result
     expect(resB.logML).toBe(-4)
@@ -81,12 +81,22 @@ describe('worker client', () => {
   it('reuses the worker for consecutive runs and rebuilds GpError from error messages', async () => {
     const { workers, client } = setup()
     const a = client.startOptimize(job(1), () => {})
-    workers[0].emit({ type: 'done', runId: a.runId, model: model(1), logML: 1, atBound: [] })
+    workers[0].emit({ type: 'done', runId: a.runId, model: model(1), logML: 1, atBound: [], converged: true })
     await a.result
     const b = client.startOptimize(job(1), () => {})
     expect(workers).toHaveLength(1)
     workers[0].emit({ type: 'error', runId: b.runId, code: 'OptimizerFailed', details: { reason: 'x' }, message: 'm' })
     await expect(b.result).rejects.toMatchObject({ code: 'OptimizerFailed', details: { reason: 'x' } })
+  })
+
+  it('passes the converged flag of the best run through to the caller', async () => {
+    const { workers, client } = setup()
+    const a = client.startOptimize(job(1), () => {})
+    workers[0].emit({ type: 'done', runId: a.runId, model: model(1), logML: 1, atBound: [], converged: false })
+    expect((await a.result).converged).toBe(false)
+    const b = client.startOptimize(job(1), () => {})
+    workers[0].emit({ type: 'done', runId: b.runId, model: model(1), logML: 1, atBound: [], converged: true })
+    expect((await b.result).converged).toBe(true)
   })
 
   it('starting a new run cancels the pending one', async () => {
@@ -95,7 +105,7 @@ describe('worker client', () => {
     const b = client.startOptimize(job(2), () => {})
     await expect(a.result).rejects.toMatchObject({ code: 'OptimizerFailed', details: { cancelled: true } })
     expect(workers[0].terminated).toBe(true)
-    workers[1].emit({ type: 'done', runId: b.runId, model: model(2), logML: 0, atBound: [] })
+    workers[1].emit({ type: 'done', runId: b.runId, model: model(2), logML: 0, atBound: [], converged: true })
     await expect(b.result).resolves.toMatchObject({ logML: 0 })
   })
 
@@ -111,7 +121,7 @@ describe('worker client', () => {
   it('cancel after completion is a no-op', async () => {
     const { workers, client } = setup()
     const a = client.startOptimize(job(1), () => {})
-    workers[0].emit({ type: 'done', runId: a.runId, model: model(1), logML: 1, atBound: [] })
+    workers[0].emit({ type: 'done', runId: a.runId, model: model(1), logML: 1, atBound: [], converged: true })
     await a.result
     a.cancel()
     expect(workers[0].terminated).toBe(false)
@@ -124,7 +134,7 @@ describe('worker client', () => {
     expect(workers[0].terminated).toBe(true)
     const b = client.startOptimize(job(1), () => {})
     expect(workers).toHaveLength(2)
-    workers[1].emit({ type: 'done', runId: b.runId, model: model(1), logML: 2, atBound: [] })
+    workers[1].emit({ type: 'done', runId: b.runId, model: model(1), logML: 2, atBound: [], converged: true })
     await expect(b.result).resolves.toMatchObject({ logML: 2 })
   })
 
@@ -150,7 +160,7 @@ describe('worker client', () => {
     expect((e as GpError).details?.cancelled).toBe(true)
     const b = client.startOptimize(job(2), () => {})
     expect(workers).toHaveLength(2)
-    workers[1].emit({ type: 'done', runId: b.runId, model: model(2), logML: 0, atBound: [] })
+    workers[1].emit({ type: 'done', runId: b.runId, model: model(2), logML: 0, atBound: [], converged: true })
     await expect(b.result).resolves.toMatchObject({ logML: 0 })
   })
 
@@ -160,7 +170,7 @@ describe('worker client', () => {
     const a = one.client.startOptimize(job(1), () => {})
     two.client.startOptimize(job(2), () => {})
     expect(one.workers[0].terminated).toBe(false)
-    one.workers[0].emit({ type: 'done', runId: a.runId, model: model(1), logML: 3, atBound: [] })
+    one.workers[0].emit({ type: 'done', runId: a.runId, model: model(1), logML: 3, atBound: [], converged: true })
     await expect(a.result).resolves.toMatchObject({ logML: 3 })
   })
 })

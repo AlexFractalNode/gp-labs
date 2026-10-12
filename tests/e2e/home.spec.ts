@@ -61,3 +61,27 @@ test('no horizontal scroll at 375 × 812', async ({ page }) => {
     expect(width).toBeLessThanOrEqual(375)
   }
 })
+
+test('no horizontal scroll on any route at 390 px (DE and EN)', async ({ page }) => {
+  test.setTimeout(90_000)
+  await page.setViewportSize({ width: 390, height: 844 })
+  for (const route of ['', 'playground', 'kernels', 'datalab']) {
+    for (const lang of ['de', 'en']) {
+      await page.goto(`/#/${route}?lang=${lang}`)
+      await expect(page.locator('[data-verify-unit="app-shell"]')).toHaveAttribute('data-verify-route', route || 'home')
+      await page.waitForLoadState('networkidle')
+      const width = await page.evaluate(() => document.documentElement.scrollWidth)
+      expect(width, `#/${route} (${lang})`).toBeLessThanOrEqual(390)
+    }
+  }
+})
+
+test('the language toggle writes ?lang= into the address, a shared link keeps it', async ({ page }) => {
+  const errors = trackErrors(page)
+  await page.goto('/#/kernels?preset=periodic&lang=de')
+  await page.locator('[data-verify-unit="lang-toggle"]').click()
+  await expect(page).toHaveURL(/#\/kernels\?.*lang=en/)
+  expect(new URL(page.url()).hash).toContain('preset=periodic')
+  await expect(page.locator('[data-verify-unit="kernel-view"]')).toHaveAttribute('data-verify-preset', 'periodic')
+  expect(errors).toEqual([])
+})

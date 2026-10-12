@@ -27,6 +27,8 @@ export interface OptimizeOutcome {
   model: GpModel
   logML: number
   atBound: string[]
+  /** False if the best run stopped before convergence; the model is then the best point found. */
+  converged: boolean
 }
 
 export type WorkerRequest = { type: 'optimize'; runId: number; job: OptimizeJob }
@@ -87,7 +89,7 @@ export function createOptimizeClient(createWorker: () => Worker = defaultCreateW
     if (msg.type === 'progress') {
       pending.onProgress({ restart: msg.restart, logML: msg.logML })
     } else if (msg.type === 'done') {
-      settle(msg.runId)?.resolve({ model: msg.model, logML: msg.logML, atBound: msg.atBound })
+      settle(msg.runId)?.resolve({ model: msg.model, logML: msg.logML, atBound: msg.atBound, converged: msg.converged })
     } else {
       settle(msg.runId)?.reject(new GpError(msg.code, msg.details, msg.message))
     }

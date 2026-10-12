@@ -100,3 +100,29 @@ test('the cached lab ignores ?kernel= of other tools and restores the template c
   await expect(template).toHaveValue('ard-rbf')
   expect(errors).toEqual([])
 })
+
+test('2D Baukasten kernels via URL: ARD and activeDims become isotropic with notices; Gibbs shows an error', async ({ page }) => {
+  const errors = trackErrors(page)
+  const template = page.locator('select[data-field="template"]')
+  const ard = kernelParam({ terms: [[{ kind: 'rbf', params: { sigma: 1, ell_0: 0.2, ell_1: 1 }, ard: true }]] })
+  await page.goto(`/#/datalab?kernel=${ard}&lang=de`)
+  await page.locator('[data-action="load-yacht"]').click()
+  await expect(page.locator(preview)).toHaveAttribute('data-verify-state', 'ready')
+  await page.locator(step('model')).click()
+  await expect(template).toHaveValue('baukasten')
+  await expect(page.locator('[data-notice="ardDropped"]')).toBeVisible()
+  await expect(page.locator('[data-action="start-run"]')).toBeEnabled()
+
+  const active = kernelParam({ terms: [[{ kind: 'rbf', params: { sigma: 1, ell: 0.2 }, activeDims: [0] }]] })
+  await page.goto(`/#/datalab?kernel=${active}&lang=de`)
+  await expect(template).toHaveValue('baukasten')
+  await expect(page.locator('[data-notice="activeDimsDropped"]')).toBeVisible()
+
+  // Gibbs needs exactly one feature: a visible error instead of a blank model step, and no run.
+  const gibbs = kernelParam({ terms: [[{ kind: 'gibbs', params: { sigma: 1, l1: 0.05, l2: 0.6, w: 0.3, x0: 1 }, fixed: ['x0'] }]] })
+  await page.goto(`/#/datalab?kernel=${gibbs}&lang=de`)
+  await expect(template).toHaveValue('baukasten')
+  await expect(page.locator('[data-problem="datalab.error.gibbsRequires1D"]')).toBeVisible()
+  await expect(page.locator('[data-action="start-run"]')).toBeDisabled()
+  expect(errors).toEqual([])
+})

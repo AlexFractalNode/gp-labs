@@ -23,7 +23,7 @@ const TOOLS: ToolCard[] = [
     name: 'nav.playground',
     summary: 'home.tool.playground.summary',
     goal: 'home.tool.playground.goal',
-    chapter: '1, 6–12',
+    chapter: '1, 6–8, 10–12',
     code: '17–48',
     example: { label: 'home.tool.playground.example', params: { preset: 'kap9', x: '0' } },
   },
@@ -33,7 +33,7 @@ const TOOLS: ToolCard[] = [
     summary: 'home.tool.kernels.summary',
     goal: 'home.tool.kernels.goal',
     chapter: '5, 8, 13',
-    code: '49–71',
+    code: '53–70',
     example: { label: 'home.tool.kernels.example', params: { preset: 'power-exp' } },
   },
   {

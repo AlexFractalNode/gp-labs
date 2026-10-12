@@ -178,6 +178,17 @@ describe('optimizeHyperparameters', () => {
     expect(Number.isFinite(res.logML)).toBe(true)
   })
 
+  it('reports whether the best run converged (false when the iteration limit stops it)', () => {
+    const g = loadGolden('sine')
+    const X = col(g.x.slice(0, 30))
+    const y = Float64Array.from(g.y.slice(0, 30))
+    const cut = optimizeHyperparameters(rbfModel(1, 1, 1), X, y, { restarts: 0, seed: 0, maxIter: 1 })
+    expect(cut.converged).toBe(false)
+    const full = optimizeHyperparameters(rbfModel(1, 1, 1), X, y, { restarts: 0, seed: 0, maxIter: 500 })
+    expect(full.converged).toBe(true)
+    expect(full.converged).toBe(full.runs[0].converged)
+  })
+
   it('is deterministic for a fixed seed', () => {
     const g = loadGolden('sine')
     const X = col(g.x.slice(0, 30))

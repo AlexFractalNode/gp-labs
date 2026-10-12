@@ -60,6 +60,7 @@ const de = {
     cancel: 'Abbrechen',
     optimizeGlsBlocked: 'Optimieren ist erst möglich, wenn genug Punkte für die GLS-Schätzung da sind.',
     atBound: 'Am Rand des Bereichs: {names}',
+    notConverged: 'Optimierer nicht vollständig konvergiert – Ergebnis ist der beste gefundene Punkt.',
     model: 'Modell',
     kernel: 'Kernel',
     kernelRbf: 'RBF (Standard)',
@@ -76,7 +77,7 @@ const de = {
     meanC: 'c',
     meanA: 'a',
     meanB: 'b',
-    glsNote: 'η̂ wird per GLS aus den Daten geschätzt. Die Bänder sind Plug-in-Bänder ohne die Unsicherheit von η̂.',
+    glsNote: 'η̂ wird per GLS aus den Daten geschätzt. Das Band ist ein Plug-in-Band: Die Unsicherheit der geschätzten Mittelwert-Koeffizienten η̂ ist darin nicht enthalten.',
     eta: 'η̂ = ({eta})',
     inspector: 'Inspektor',
     inspectorHint: 'Folgt dem Mauszeiger. Ein eingetragenes x* hält die Stelle fest.',
@@ -254,6 +255,10 @@ const de = {
       use: 'Im Playground verwenden',
       disabled2d: 'Der Playground ist eindimensional; Kernel mit zwei Eingaben lassen sich nicht übertragen.',
       disabledInvalid: 'Ein ungültiger Kernel lässt sich nicht übertragen.',
+    },
+    transfer: {
+      useDatalab: 'Im Daten-Lab verwenden',
+      pending: 'Die Gültigkeit des Kernels wird noch geprüft …',
     },
   },
   error: {
@@ -486,7 +491,7 @@ const de = {
     roadmap: {
       r1: {
         name: 'Gauß- und Cholesky-Lab',
-        desc: 'Zweidimensionale Normalverteilung mit Korrelationsregler, die Konstruktion x = m + L u Schritt für Schritt und Bedingen als Schnitt.',
+        desc: 'Zweidimensionale Normalverteilung mit Korrelationsregler, die Konstruktion x\u00a0=\u00a0m\u00a0+\u00a0L\u00a0u Schritt für Schritt und Bedingen als Schnitt.',
       },
       r2: {
         name: 'Algorithmus-Stepper',

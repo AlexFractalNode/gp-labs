@@ -14,7 +14,6 @@ import { GpError } from '../../core/errors'
 import { kernelTex, MAX_ARD_DIM, type KernelSpec } from '../../core/kernels'
 import { createRng } from '../../core/rng'
 import { createOptimizeClient, type OptimizeHandle } from '../../worker/client'
-import { inputDimOf } from '../kernels/compute'
 import RefBadge from '../../ui/RefBadge.vue'
 import {
   buildModelWithNotices,
@@ -226,8 +225,10 @@ const template = ref<TemplateChoice>('notebook')
 const restarts = ref(5)
 
 /**
- * Kernel from the Kernel-Baukasten (`?kernel=`), offered when it decodes to a valid 1D spec. Read only while the
- * lab's own route is shown: the cached (KeepAlive) lab must not react to the `?kernel=` of other tools.
+ * Kernel from the Kernel-Baukasten (`?kernel=`), offered when it decodes to a valid spec. 2D kernels (ARD,
+ * activeDims) are adapted by `buildModelWithNotices` with visible notices; a kernel that cannot be used (e.g. Gibbs
+ * on several features) shows its error in step 4. Read only while the lab's own route is shown: the cached
+ * (KeepAlive) lab must not react to the `?kernel=` of other tools.
  */
 const urlKernel = shallowRef<KernelSpec | null>(null)
 watch(
@@ -236,7 +237,7 @@ watch(
     if (r.route !== 'datalab') return
     const k = r.params.get(KERNEL_PARAM)
     const spec = k === null ? null : decodeKernel(k)
-    urlKernel.value = spec !== null && inputDimOf(spec) === 1 ? spec : null
+    urlKernel.value = spec
   },
   { immediate: true },
 )

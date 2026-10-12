@@ -235,8 +235,9 @@ function validateData(X: Mat, y: Float64Array): void {
  * the bounds); runs 1…restarts start uniformly in the log-bounds clipped to ±3 log units around them (sklearn's
  * n_restarts_optimizer convention: restarts + 1 runs in total). `shouldStop` is checked before every run after
  * the first. Throws GpError('OptimizerFailed') if no run reaches a finite value.
- * Returns the best model, its log ML, every run (reported as +log ML) and the parameter names within 1e-3 log
- * units of a bound.
+ * Returns the best model, its log ML, whether the best run converged (false: it stopped at the iteration limit or a
+ * failed line search, so the result is the best point found), every run (reported as +log ML) and the parameter
+ * names within 1e-3 log units of a bound.
  */
 export function optimizeHyperparameters(
   model: GpModel,
@@ -249,7 +250,7 @@ export function optimizeHyperparameters(
     onProgress?: (p: { restart: number; logML: number }) => void
     shouldStop?: () => boolean
   },
-): { model: GpModel; logML: number; runs: HyperparameterRun[]; atBound: string[] } {
+): { model: GpModel; logML: number; converged: boolean; runs: HyperparameterRun[]; atBound: string[] } {
   validateData(X, y)
   if (!(opts.restarts >= 0) || !Number.isInteger(opts.restarts)) {
     throw new GpError('InvalidInput', { reason: 'restarts', value: opts.restarts })
@@ -288,5 +289,5 @@ export function optimizeHyperparameters(
   const atBound = info.names.filter(
     (_, i) => bestX[i] - lo[i] < AT_BOUND_TOL || hi[i] - bestX[i] < AT_BOUND_TOL,
   )
-  return { model: withModelLogParams(model, d, bestX), logML: -best.value, runs, atBound }
+  return { model: withModelLogParams(model, d, bestX), logML: -best.value, converged: best.converged, runs, atBound }
 }

@@ -55,10 +55,10 @@ const running = computed(() => props.run.state === 'loading')
           <strong>{{ t('datalab.model.baukastenTitle') }}</strong>
           <ul class="plain">
             <li>{{ t('datalab.model.isotropic') }}</li>
-            <li v-for="n in preview?.notices ?? []" :key="n">{{ t(`datalab.baukasten.${n}`) }}</li>
+            <li v-for="n in preview?.notices ?? []" :key="n" :data-notice="n">{{ t(`datalab.baukasten.${n}`) }}</li>
           </ul>
         </div>
-        <p v-if="preview?.problem" class="error-box" role="alert">{{ t(preview.problem.key, preview.problem.vars) }}</p>
+        <p v-if="preview?.problem" class="error-box" role="alert" :data-problem="preview.problem.key">{{ t(preview.problem.key, preview.problem.vars) }}</p>
       </div>
 
       <div>

@@ -64,6 +64,7 @@ const en: Messages<typeof de> = {
     cancel: 'Cancel',
     optimizeGlsBlocked: 'Optimisation becomes available once there are enough points for the GLS estimate.',
     atBound: 'At the range limit: {names}',
+    notConverged: 'The optimiser did not fully converge – the result is the best point found.',
     model: 'Model',
     kernel: 'Kernel',
     kernelRbf: 'RBF (default)',
@@ -80,7 +81,7 @@ const en: Messages<typeof de> = {
     meanC: 'c',
     meanA: 'a',
     meanB: 'b',
-    glsNote: 'η̂ is estimated from the data by GLS. The bands are plug-in bands without the uncertainty of η̂.',
+    glsNote: 'η̂ is estimated from the data by GLS. The band is a plug-in band: it does not include the uncertainty of the estimated mean coefficients η̂.',
     eta: 'η̂ = ({eta})',
     inspector: 'Inspector',
     inspectorHint: 'Follows the pointer. Entering x* pins the location.',
@@ -258,6 +259,10 @@ const en: Messages<typeof de> = {
       use: 'Use in Playground',
       disabled2d: 'The Playground is one-dimensional; kernels with two inputs cannot be transferred.',
       disabledInvalid: 'An invalid kernel cannot be transferred.',
+    },
+    transfer: {
+      useDatalab: 'Use in Data Lab',
+      pending: 'The kernel is still being checked for validity …',
     },
   },
   error: {
@@ -490,7 +495,7 @@ const en: Messages<typeof de> = {
     roadmap: {
       r1: {
         name: 'Gaussian and Cholesky lab',
-        desc: 'A two-dimensional normal distribution with a correlation slider, the construction x = m + L u step by step, and conditioning as a slice.',
+        desc: 'A two-dimensional normal distribution with a correlation slider, the construction x\u00a0=\u00a0m\u00a0+\u00a0L\u00a0u step by step, and conditioning as a slice.',
       },
       r2: {
         name: 'Algorithm stepper',
