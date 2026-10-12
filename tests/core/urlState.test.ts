@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildHash, decodeKernel, encodeKernel, parseHash } from '../../src/urlState'
-import { useNotices, notify } from '../../src/notify'
+import { KERNEL_PARAM, buildHash, decodeKernel, encodeKernel, parseHash, urlProblems } from '../../src/urlState'
+import { useNotices, notify, dismissNotice } from '../../src/notify'
 
 describe('parseHash', () => {
   it('parses route and params', () => {
@@ -46,9 +46,36 @@ describe('kernel codec', () => {
 describe('notify', () => {
   it('appends a notice', () => {
     const n = useNotices()
+    n.value.forEach((x) => dismissNotice(x.id))
     const before = n.value.length
     notify('notice.invalidUrl')
     expect(n.value.length).toBe(before + 1)
     expect(n.value[before].key).toBe('notice.invalidUrl')
+  })
+})
+
+describe('notify dedupe', () => {
+  it('keeps a single entry for a repeated key', () => {
+    const n = useNotices()
+    n.value.forEach((x) => dismissNotice(x.id))
+    notify('notice.invalidUrl')
+    notify('notice.invalidUrl')
+    expect(n.value.length).toBe(1)
+  })
+})
+
+describe('urlProblems', () => {
+  it('flags unknown routes', () => {
+    expect(urlProblems(parseHash('#/nope'))).toEqual(['notice.invalidUrl'])
+  })
+  it('flags an undecodable kernel param', () => {
+    expect(urlProblems(parseHash(`#/playground?${KERNEL_PARAM}=%25%25%25`))).toEqual([
+      'notice.invalidUrl',
+    ])
+  })
+  it('accepts valid URLs', () => {
+    const h = buildHash('playground', { [KERNEL_PARAM]: encodeKernel({ terms: [[]] }) })
+    expect(urlProblems(parseHash(h))).toEqual([])
+    expect(urlProblems(parseHash('#/kernels'))).toEqual([])
   })
 })

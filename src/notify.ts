@@ -11,6 +11,7 @@ const notices: Ref<Notice[]> = ref([])
 let nextId = 1
 
 export function notify(key: MessageKey, vars?: Record<string, string | number>): void {
+  if (notices.value.some((n) => n.key === key)) return
   notices.value.push({ id: nextId++, key, vars })
 }
 

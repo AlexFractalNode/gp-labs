@@ -3,7 +3,7 @@ import { computed, watch } from 'vue'
 import { useRoute } from './router'
 import { useI18n, setLang, type MessageKey } from './i18n'
 import { dismissNotice, notify, useNotices } from './notify'
-import { buildHash, decodeKernel, type Route } from './urlState'
+import { buildHash, urlProblems, type Route } from './urlState'
 
 const { lang, t } = useI18n()
 const current = useRoute()
@@ -22,8 +22,7 @@ const route = computed(() => current.value.route)
 watch(
   current,
   (c) => {
-    const k = c.params.get('k')
-    if (c.unknownRoute || (k !== null && decodeKernel(k) === null)) notify('notice.invalidUrl')
+    for (const key of urlProblems(c)) notify(key)
   },
   { immediate: true },
 )

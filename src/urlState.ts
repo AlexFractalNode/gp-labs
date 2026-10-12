@@ -1,3 +1,5 @@
+import type { MessageKey } from './i18n'
+
 export type Route = 'home' | 'playground' | 'kernels' | 'datalab'
 
 const ROUTES: readonly Route[] = ['home', 'playground', 'kernels', 'datalab']
@@ -61,4 +63,17 @@ export function decodeKernel(s: string): KernelSpec | null {
   } catch {
     return null
   }
+}
+
+export const KERNEL_PARAM = 'kernel'
+
+/** Problems in the parsed URL that warrant a notice; empty when the URL is fine. */
+export function urlProblems(state: {
+  route: Route
+  params: URLSearchParams
+  unknownRoute: boolean
+}): MessageKey[] {
+  const k = state.params.get(KERNEL_PARAM)
+  if (state.unknownRoute || (k !== null && decodeKernel(k) === null)) return ['notice.invalidUrl']
+  return []
 }
