@@ -9,8 +9,8 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview --port 4173 --strictPort",
     "test": "vitest run",
-    "test:py": "uv run --python 3.9 --with numpy==1.26.4 --with scipy==1.13.1 --with scikit-learn==1.6.1 --with pandas==2.3.3 --with pytest pytest -q tests/py",
-    "golden": "uv run --python 3.9 --with numpy==1.26.4 --with scipy==1.13.1 --with scikit-learn==1.6.1 --with pandas==2.3.3 --with pytest python scripts/make_golden.py",
+    "test:py": "uv run --native-tls --python 3.9 --with numpy==1.26.4 --with scipy==1.13.1 --with scikit-learn==1.6.1 --with pandas==2.3.3 --with pytest pytest -q tests/py",
+    "golden": "uv run --native-tls --python 3.9 --with numpy==1.26.4 --with scipy==1.13.1 --with scikit-learn==1.6.1 --with pandas==2.3.3 --with pytest python scripts/make_golden.py",
     "test:e2e": "playwright test",
     "guard": "node scripts/check-no-materials.mjs"
   },
