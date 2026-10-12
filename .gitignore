@@ -1,0 +1,9 @@
+node_modules/
+dist/
+materials/
+.pytest_cache/
+__pycache__/
+test-results/
+playwright-report/
+*.ipynb
+*.pdf
