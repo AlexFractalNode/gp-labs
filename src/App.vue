@@ -5,6 +5,7 @@ import { useI18n, setLang, type MessageKey } from './i18n'
 import { dismissNotice, notify, useNotices } from './notify'
 import { buildHash, urlProblems, type Route } from './urlState'
 import PlaygroundView from './tools/playground/PlaygroundView.vue'
+import KernelsView from './tools/kernels/KernelsView.vue'
 
 const { lang, t } = useI18n()
 const current = useRoute()
@@ -70,6 +71,7 @@ function toggleLang() {
     </section>
     <main>
       <PlaygroundView v-if="route === 'playground'" />
+      <KernelsView v-else-if="route === 'kernels'" />
       <p v-else>{{ t('home.placeholder') }}</p>
     </main>
   </div>
