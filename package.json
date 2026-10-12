@@ -15,9 +15,15 @@
     "guard": "node scripts/check-no-materials.mjs"
   },
   "dependencies": {
+    "d3-scale": "4.0.2",
+    "d3-shape": "3.2.0",
+    "katex": "0.19.0",
     "vue": "3.5.43"
   },
   "devDependencies": {
+    "@types/d3-scale": "^4.0.9",
+    "@types/d3-shape": "^3.2.0",
+    "@types/katex": "^0.16.8",
     "@types/node": "^26.6.5",
     "@vitejs/plugin-vue": "6.0.10",
     "@vue/test-utils": "^2.5.1",

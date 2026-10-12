@@ -1,10 +1,66 @@
+/* Design tokens: calm academic palette (paper / ink), light and dark. */
 :root {
   color-scheme: light dark;
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --bg: #fbfaf7;
+  --surface: #ffffff;
+  --text: #1b2230;
+  --text-muted: #4f596b;
+  --border: #c9ced8;
+  --grid: #e6e8ee;
+  --axis: #5b6577;
+  --accent: #2b5c9e;
+  --focus: #b4530a;
+  --error: #b3261e;
+  --error-bg: #fdecea;
+
+  /* Plot variants (each >= 3:1 on --bg). */
+  --c-f: #2b5c9e;
+  --c-y: #b45309;
+  --c-mean: #1b2230;
+  --c-sample: #1f7a70;
+  --c-prior: #7a5a9c;
+  --c-truth: #b0304a;
+  --c-points: #111827;
 }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14181f;
+    --surface: #1c222c;
+    --text: #e8edf5;
+    --text-muted: #aab3c2;
+    --border: #3a4352;
+    --grid: #262d39;
+    --axis: #8d97a8;
+    --accent: #7fb0ee;
+    --focus: #f5b062;
+    --error: #f2877f;
+    --error-bg: #3a1f1d;
+
+    --c-f: #7fb0ee;
+    --c-y: #f0b060;
+    --c-mean: #e8edf5;
+    --c-sample: #6fd0c4;
+    --c-prior: #b8a3d8;
+    --c-truth: #f08aa0;
+    --c-points: #ffffff;
+  }
+}
+
+/* Variant -> colour, used by all plot layers via var(--v). */
+[data-variant='f'] { --v: var(--c-f); }
+[data-variant='y'] { --v: var(--c-y); }
+[data-variant='mean'] { --v: var(--c-mean); }
+[data-variant='sample'] { --v: var(--c-sample); }
+[data-variant='prior'] { --v: var(--c-prior); }
+[data-variant='truth'] { --v: var(--c-truth); }
 
 body {
   margin: 0;
+  background: var(--bg);
+  color: var(--text);
 }
 
 main {
