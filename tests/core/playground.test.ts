@@ -2,7 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { isKernelSpec } from '../../src/core/kernels'
 import { inspectAt } from '../../src/tools/playground/inspect'
 import { loadPreset, PRESETS } from '../../src/tools/playground/presets'
-import { computeGrid, computeMeanOnly, fitYDomain, logMarginalLikelihoodValue, resolveKernel } from '../../src/tools/playground/compute'
+import {
+  computeGrid,
+  computeMeanOnly,
+  fitTraining,
+  fitYDomain,
+  logMarginalLikelihoodValue,
+  NO_NOTICE_FLAGS,
+  noticeTransitions,
+  resolveKernel,
+} from '../../src/tools/playground/compute'
+import { startTween } from '../../src/tools/playground/tween'
 import { logMarginalLikelihood } from '../../src/core/gp'
 import { fromRows } from '../../src/core/linalg'
 import { encodeKernel } from '../../src/urlState'
@@ -98,14 +108,27 @@ describe('playground view logic', () => {
     expect(resolveKernel(encodeKernel(active), base).notices).toEqual(['notice.kernel2d'])
   })
 
-  it('computeMeanOnly equals the full posterior mean (incl. GLS)', () => {
+  it('computeMeanOnly from the shared fit equals the full posterior mean (incl. GLS)', () => {
     const s = PRESETS.extrapolation()
     for (const mean of [s.model.mean, { kind: 'gls' as const, basis: 'linear' as const }]) {
       const model = { ...s.model, mean }
-      const full = computeGrid(model, s.points, s.view, { samples: null, seed: 1 })
-      const m = computeMeanOnly(model, s.points, full.xs)!
-      for (let i = 0; i < m.length; i++) expect(m[i]).toBeCloseTo(full.mean[i], 10)
+      const tf = fitTraining(model, s.points)
+      const full = computeGrid(model, s.points, s.view, { samples: null, seed: 1, training: tf })
+      const ref = computeGrid(model, s.points, s.view, { samples: null, seed: 1 })
+      const m = computeMeanOnly(model, full.xs, tf)!
+      for (let i = 0; i < m.length; i++) {
+        expect(m[i]).toBeCloseTo(full.mean[i], 10)
+        expect(full.mean[i]).toBe(ref.mean[i])
+      }
     }
+  })
+
+  it('computeMeanOnly returns null for an underdetermined GLS mean (caller must recompute fully later)', () => {
+    const s = PRESETS.kap9()
+    const model = { ...s.model, mean: { kind: 'gls' as const, basis: 'linear' as const } }
+    const tf = fitTraining(model, s.points)
+    expect(tf.glsUnderdetermined).toBe(true)
+    expect(computeMeanOnly(model, Float64Array.from([0, 1]), tf)).toBeNull()
   })
 
   it('computeGrid: GLS with one point falls back to the prior; samples are finite', () => {
@@ -123,32 +146,121 @@ describe('playground view logic', () => {
     expect(p.sdF.every((v) => Math.abs(v - 1) < 1e-12)).toBe(true)
   })
 
-  it('computeGrid: two identical x at minimal noise succeed with jitter or exactly', () => {
+  it('two identical x with (near) zero noise need jitter, and jitter > 0 raises the notice once (Review Focus 2)', () => {
     const s = PRESETS.kap9()
-    const model = { ...s.model, sigmaN: Math.sqrt(1e-5) }
+    // σn = 1e-9 makes C_X = K + 1e-18 I singular for duplicate x, so the Cholesky fallback must add jitter.
+    const model = { ...s.model, sigmaN: 1e-9 }
     const r = computeGrid(model, [{ x: 0.5, y: 1 }, { x: 0.5, y: 1 }], s.view, { samples: 'posterior', seed: 1 })
+    expect(r.jitter).toBeGreaterThan(0)
     expect(r.mean.every(Number.isFinite)).toBe(true)
     expect(r.samplesFailed || r.samples.length === 5).toBe(true)
+    const first = noticeTransitions(NO_NOTICE_FLAGS, r)
+    expect(first.raised).toContain('jitter')
+    // Same condition on the next recompute: no repeated notice.
+    expect(noticeTransitions(first.next, r).raised).toEqual([])
+    // Condition gone and back: raised again.
+    const clear = noticeTransitions(first.next, { jitter: 0, glsFallback: false, samplesFailed: false })
+    expect(noticeTransitions(clear.next, r).raised).toContain('jitter')
+  })
+
+  it('noticeTransitions raises the GLS notice only on false -> true', () => {
+    const gls = { jitter: 0, glsFallback: true, samplesFailed: false }
+    const a = noticeTransitions(NO_NOTICE_FLAGS, gls)
+    expect(a.raised).toEqual(['gls'])
+    expect(noticeTransitions(a.next, gls).raised).toEqual([])
   })
 
   it('fitYDomain holds points and prior band', () => {
     const s = PRESETS['mean-demo']()
     const [lo, hi] = fitYDomain(s.model, s.points, s.view)
-    expect(lo).toBeLessThanOrEqual(20.1 - 0)
-    expect(hi).toBeGreaterThanOrEqual(22 + 2 * Math.sqrt(1.04))
+    const minY = Math.min(...s.points.map((p) => p.y))
+    const maxY = Math.max(...s.points.map((p) => p.y))
+    expect(s.model.mean.kind).toBe('constant')
+    const c = s.model.mean.kind === 'constant' ? s.model.mean.c : NaN
+    const sigma = s.model.kernel.terms[0][0].params.sigma
+    const priorSdY = Math.sqrt(sigma ** 2 + s.model.sigmaN ** 2)
+    expect(lo).toBeLessThanOrEqual(Math.min(minY, c - 2 * priorSdY))
+    expect(hi).toBeGreaterThanOrEqual(Math.max(maxY, c + 2 * priorSdY))
   })
 })
 
-describe('playground log-ML value', () => {
-  it('equals the core log marginal likelihood (prescribed and GLS mean); null without points', () => {
+describe('playground log-ML value and inspector fit reuse', () => {
+  it('log-ML value from the shared fit equals the core log marginal likelihood; null without a fit', () => {
     const s = PRESETS['mean-demo']()
     const X = fromRows(s.points.map((p) => [p.x]))
     const y = Float64Array.from(s.points.map((p) => p.y))
     for (const mean of [s.model.mean, { kind: 'gls' as const, basis: 'linear' as const }]) {
       const model = { ...s.model, mean }
-      expect(logMarginalLikelihoodValue(model, s.points)).toBeCloseTo(logMarginalLikelihood(model, X, y).value, 10)
+      expect(logMarginalLikelihoodValue(fitTraining(model, s.points))).toBeCloseTo(logMarginalLikelihood(model, X, y).value, 10)
     }
-    expect(logMarginalLikelihoodValue(s.model, [])).toBeNull()
-    expect(logMarginalLikelihoodValue({ ...s.model, mean: { kind: 'gls', basis: 'linear' } }, [s.points[0]])).toBeNull()
+    expect(logMarginalLikelihoodValue(fitTraining(s.model, []))).toBeNull()
+    expect(logMarginalLikelihoodValue(fitTraining({ ...s.model, mean: { kind: 'gls', basis: 'linear' } }, [s.points[0]]))).toBeNull()
+  })
+
+  it('inspectAt with a passed fit equals the standalone result and returns the Kap. 9 terms', () => {
+    const s = PRESETS.kap9()
+    const fit = fitTraining(s.model, s.points).fit!
+    const a = inspectAt(s, 0, { fit })
+    const b = inspectAt(s, 0)
+    expect(a).toEqual(b)
+    expect(a.onePoint).toEqual({ kStar1: 1, k11: 1, kStarStar: 1, mStar: 0, m1: 0 })
+    // w = k*1 / (k11 + σn²), f̄ = m* + w (y1 − m1), s_f² = k** − w k*1
+    const op = a.onePoint!
+    expect(a.weight).toBeCloseTo(op.kStar1 / (op.k11 + s.model.sigmaN ** 2), 12)
+    expect(a.mean).toBeCloseTo(op.mStar + a.weight! * (s.points[0].y - op.m1), 12)
+    expect(a.sdF ** 2).toBeCloseTo(op.kStarStar - a.weight! * op.kStar1, 12)
+    // GLS mean: no prescribed m, so no one-point terms.
+    expect(inspectAt({ ...s, model: { ...s.model, mean: { kind: 'gls', basis: 'constant' } } }, 0).onePoint).toBeUndefined()
+  })
+})
+
+describe('slider tween', () => {
+  function fakeFrames() {
+    let t = 0
+    let next = 1
+    const queue = new Map<number, (now: number) => void>()
+    return {
+      requestFrame: (cb: (now: number) => void) => {
+        const id = next++
+        queue.set(id, cb)
+        return id
+      },
+      cancelFrame: (id: number) => void queue.delete(id),
+      now: () => t,
+      advance(ms: number) {
+        t += ms
+        const due = [...queue.values()]
+        queue.clear()
+        for (const cb of due) cb(t)
+      },
+      pending: () => queue.size,
+    }
+  }
+
+  it('applies eased values and finishes once after the duration', () => {
+    const f = fakeFrames()
+    const applied: number[] = []
+    let finished = 0
+    const h = startTween({ from: [0], to: [1], durationMs: 400, apply: (v) => applied.push(v[0]), finish: () => finished++, ...f })
+    f.advance(200)
+    expect(applied).toEqual([0.5])
+    f.advance(250)
+    expect(finished).toBe(1)
+    expect(h.active).toBe(false)
+    expect(f.pending()).toBe(0)
+  })
+
+  it('cancel stops all further apply/finish calls (a stale optimum is never applied)', () => {
+    const f = fakeFrames()
+    const applied: number[] = []
+    let finished = 0
+    const h = startTween({ from: [0], to: [1], durationMs: 400, apply: (v) => applied.push(v[0]), finish: () => finished++, ...f })
+    f.advance(100)
+    h.cancel()
+    expect(f.pending()).toBe(0)
+    f.advance(1000)
+    expect(applied).toHaveLength(1)
+    expect(finished).toBe(0)
+    expect(h.active).toBe(false)
   })
 })

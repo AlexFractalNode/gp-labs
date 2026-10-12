@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from '../../i18n'
-import { kernelMatrix } from '../../core/kernels'
-import { fromRows } from '../../core/linalg'
-import { meanValues } from '../../core/mean'
 import Formula from '../../ui/Formula.vue'
 import RefBadge from '../../ui/RefBadge.vue'
 import type { InspectResult } from './inspect'
@@ -45,16 +42,10 @@ const rows = computed(() => {
 /** Kap. 9: with one data point the posterior is a weighted pull towards y₁ (only for a prescribed mean). */
 const onePointTex = computed(() => {
   const r = props.result
-  if (!r || r.weight === undefined || props.points.length !== 1 || props.model.mean.kind === 'gls') return null
+  // Terms come from inspectAt (same fit as the plot); only with one point and a prescribed mean.
+  if (!r || r.weight === undefined || !r.onePoint || props.points.length !== 1) return null
   const p = props.points[0]
-  const Xs = fromRows([[props.x]])
-  const X1 = fromRows([[p.x]])
-  const k = props.model.kernel
-  const ks1 = kernelMatrix(k, Xs, X1, { sameSet: false }).data[0]
-  const k11 = kernelMatrix(k, X1, X1, { sameSet: true }).data[0]
-  const kss = kernelMatrix(k, Xs, Xs, { sameSet: false }).data[0]
-  const m1 = meanValues(props.model.mean, X1)[0]
-  const ms = meanValues(props.model.mean, Xs)[0]
+  const { kStar1: ks1, k11, kStarStar: kss, m1, mStar: ms } = r.onePoint
   const s2 = props.model.sigmaN ** 2
   return [
     String.raw`\begin{aligned}`,
@@ -107,7 +98,7 @@ function onBlur() {
     aria-labelledby="inspector-title"
   >
     <header class="head">
-      <h2 id="inspector-title">{{ t('playground.inspector') }}</h2>
+      <h3 id="inspector-title">{{ t('playground.inspector') }}</h3>
       <RefBadge chapter="9" code="39" />
     </header>
     <p class="hint">{{ t('playground.inspectorHint') }}</p>
@@ -168,7 +159,7 @@ function onBlur() {
   gap: 0.5rem;
   flex-wrap: wrap;
 }
-h2 {
+h3 {
   margin: 0;
   font: inherit;
   font-size: 0.75rem;

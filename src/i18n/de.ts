@@ -58,6 +58,7 @@ const de = {
     optimize: 'Hyperparameter optimieren',
     optimizing: 'Optimiere … Lauf {run} von {total}',
     cancel: 'Abbrechen',
+    optimizeGlsBlocked: 'Optimieren ist erst möglich, wenn genug Punkte für die GLS-Schätzung da sind.',
     atBound: 'Am Rand des Bereichs: {names}',
     model: 'Modell',
     kernel: 'Kernel',

@@ -62,6 +62,7 @@ const en: Messages<typeof de> = {
     optimize: 'Optimise hyperparameters',
     optimizing: 'Optimising … run {run} of {total}',
     cancel: 'Cancel',
+    optimizeGlsBlocked: 'Optimisation becomes available once there are enough points for the GLS estimate.',
     atBound: 'At the range limit: {names}',
     model: 'Model',
     kernel: 'Kernel',

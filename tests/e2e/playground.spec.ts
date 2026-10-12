@@ -68,3 +68,51 @@ test('clicking the plot adds a point', async ({ page }) => {
   await expect(page.locator(plot)).toHaveAttribute('data-verify-count', '5')
   expect(errors).toEqual([])
 })
+
+test('unpin then hyper quick switch does not bring back ?x= (live URL params)', async ({ page }) => {
+  const errors = trackErrors(page)
+  await page.goto('/#/playground?preset=hyper&lang=de&x=0.5')
+  const insp = page.locator(inspector)
+  await expect(insp).toHaveAttribute('data-verify-pinned', 'true')
+  await insp.getByRole('button', { name: 'Lösen' }).click()
+  await expect(insp).toHaveAttribute('data-verify-pinned', 'false')
+  expect(page.url()).not.toContain('x=')
+  await page.getByRole('button', { name: /Code 45/ }).click()
+  await expect(page).toHaveURL(/preset=hyper-45/)
+  expect(page.url()).not.toContain('x=')
+  await expect(insp).toHaveAttribute('data-verify-pinned', 'false')
+  expect(errors).toEqual([])
+})
+
+test('reloading the preset during optimisation never applies the stale optimum', async ({ page }) => {
+  const errors = trackErrors(page)
+  await page.goto('/#/playground?preset=kap9&lang=de')
+  await expect(page.locator(plot)).toHaveAttribute('data-verify-state', 'ready')
+  const optimizer = page.locator('[data-verify-unit="playground-optimizer"]')
+  await page.locator('button[data-action="optimize"]').click()
+  await expect(optimizer).toHaveAttribute('data-verify-state', 'loading')
+  // The result has arrived: the 400 ms slider tween is now running. Reload the preset in the middle of it.
+  await expect(optimizer).toHaveAttribute('data-verify-state', 'ready', { timeout: 20_000 })
+  await page.locator('button[data-action="reset"]').click()
+  // Longer than the tween: the preset values must survive.
+  await page.waitForTimeout(1500)
+  const values = await page.locator('[data-verify-unit="playground-model"] [role="slider"]').evaluateAll((els) =>
+    els.map((e) => e.getAttribute('aria-valuenow')),
+  )
+  expect(values).toEqual(['1', '1', '0.5'])
+  await expect(page.locator('[data-verify-unit="playground-optimizer"]')).toHaveAttribute('data-verify-state', 'ready')
+  expect(errors).toEqual([])
+})
+
+test('GLS mean with too few points: prior shown, optimise disabled with a reason', async ({ page }) => {
+  const errors = trackErrors(page)
+  await page.goto('/#/playground?preset=kap9&lang=de')
+  await page.getByLabel('GLS linear').check()
+  await expect(page.locator(plot)).toHaveAttribute('data-verify-mode', 'prior')
+  await expect(page.locator(plot)).toHaveAttribute('data-verify-state', 'ready')
+  const btn = page.locator('button[data-action="optimize"]')
+  await expect(btn).toBeDisabled()
+  await expect(btn).toHaveAttribute('aria-describedby', 'optimize-blocked')
+  await expect(page.locator('#optimize-blocked')).toBeVisible()
+  expect(errors).toEqual([])
+})

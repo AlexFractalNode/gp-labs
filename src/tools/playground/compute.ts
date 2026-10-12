@@ -4,10 +4,21 @@
  */
 import { scaleLinear } from 'd3-scale'
 import { GpError } from '../../core/errors'
-import { drawSamples, posterior, priorMoments, standardNormals, type GpModel, type Posterior } from '../../core/gp'
+import {
+  drawSamples,
+  fitModel,
+  logMarginalLikelihoodFromFit,
+  posterior,
+  posteriorMean,
+  priorMoments,
+  standardNormals,
+  type Fit,
+  type GpModel,
+  type Posterior,
+} from '../../core/gp'
 import { freeParams, kernelDiag, kernelMatrix, type BaseKernel, type KernelSpec } from '../../core/kernels'
-import { cholesky, colVec, fromRows, solveLower, solveUpperT, zeros, type Mat } from '../../core/linalg'
-import { basisMatrix, fitGls, meanValues } from '../../core/mean'
+import { fromRows, zeros, type Mat } from '../../core/linalg'
+import { meanValues } from '../../core/mean'
 import { createRng } from '../../core/rng'
 import { decodeKernel } from '../../urlState'
 import type { MessageKey } from '../../i18n'
@@ -66,7 +77,8 @@ export function resolveKernel(
     // Must work on 1D input (warps that need more dimensions, etc.).
     freeParams(kernel, 1)
     kernelMatrix(kernel, fromRows([[0], [1]]), fromRows([[0], [1]]), { sameSet: true })
-  } catch {
+  } catch (e) {
+    if (!(e instanceof GpError)) throw e
     return fallback(['notice.kernel2d'])
   }
   return { model: { ...base, kernel, sigmaN }, fromUrl: true, notices }
@@ -102,22 +114,32 @@ function trainingData(points: Point[]): { X: Mat; y: Float64Array } {
 const isGlsRankDeficient = (e: unknown) =>
   e instanceof GpError && e.code === 'InvalidInput' && e.details?.reason === 'glsRankDeficient'
 
-/** Posterior at Xs, or prior moments when a GLS mean is underdetermined (other errors propagate). */
-function posteriorOrPrior(
-  model: GpModel,
-  points: Point[],
-  Xs: Mat,
-  fullCov: boolean,
-): { post: Posterior; glsFallback: boolean } {
+/** Training data with its core fit, shared by grid, mean-only path, log-ML and inspector. */
+export interface TrainingFit {
+  X: Mat
+  y: Float64Array
+  /** Core `fitModel` result; null without points or with an underdetermined GLS mean. */
+  fit: Fit | null
+  /** GLS mean without enough distinct points: the prior is shown. */
+  glsUnderdetermined: boolean
+}
+
+/** Factorises C_X once (core `fitModel`). Other GpErrors (e.g. NotPositiveDefinite) propagate. */
+export function fitTraining(model: GpModel, points: Point[]): TrainingFit {
   const { X, y } = trainingData(points)
+  if (points.length === 0) return { X, y, fit: null, glsUnderdetermined: false }
   try {
-    return { post: posterior(model, X, y, Xs, { fullCov }), glsFallback: false }
+    return { X, y, fit: fitModel(model, X, y), glsUnderdetermined: false }
   } catch (e) {
-    if (model.mean.kind === 'gls' && isGlsRankDeficient(e)) {
-      return { post: priorMoments(model, Xs, { fullCov }), glsFallback: true }
-    }
+    if (model.mean.kind === 'gls' && isGlsRankDeficient(e)) return { X, y, fit: null, glsUnderdetermined: true }
     throw e
   }
+}
+
+/** Posterior at Xs from a training fit, or prior moments without points / with an underdetermined GLS mean. */
+function posteriorOrPrior(model: GpModel, tf: TrainingFit, Xs: Mat, fullCov: boolean): Posterior {
+  if (!tf.fit) return priorMoments(model, Xs, { fullCov })
+  return posterior(model, tf.X, tf.y, Xs, { fullCov, fit: tf.fit })
 }
 
 function meanLine(model: GpModel, Xs: Mat, eta: Float64Array | undefined): Float64Array {
@@ -127,18 +149,21 @@ function meanLine(model: GpModel, Xs: Mat, eta: Float64Array | undefined): Float
 
 /**
  * Full grid prediction. Samples use the fixed standard normals of `seed`, so they morph smoothly while sliders
- * move. Throws GpError (NotPositiveDefinite / InvalidInput) when the posterior itself cannot be computed.
+ * move. `opts.training` (from `fitTraining` for the same model and points) avoids refactorising C_X.
+ * Throws GpError (NotPositiveDefinite / InvalidInput) when the posterior itself cannot be computed.
  */
 export function computeGrid(
   model: GpModel,
   points: Point[],
   view: [number, number],
-  opts: { samples: 'prior' | 'posterior' | null; seed: number; cov?: boolean },
+  opts: { samples: 'prior' | 'posterior' | null; seed: number; cov?: boolean; training?: TrainingFit },
 ): GridResult {
+  const tf = opts.training ?? fitTraining(model, points)
   const xs = linspace(view[0], view[1], GRID_N)
   const Xs = fromRows(Array.from(xs, (x) => [x]))
-  const wantPrior = opts.samples === 'prior' || points.length === 0
-  const { post, glsFallback } = posteriorOrPrior(model, points, Xs, opts.samples === 'posterior' && !wantPrior)
+  const prior = tf.fit === null
+  const wantPriorSamples = opts.samples === 'prior' || prior
+  const post = posteriorOrPrior(model, tf, Xs, opts.samples === 'posterior' && !wantPriorSamples)
   const res: GridResult = {
     xs,
     mean: post.mean,
@@ -148,14 +173,14 @@ export function computeGrid(
     samples: [],
     samplesFailed: false,
     jitter: post.jitter,
-    glsFallback,
-    prior: points.length === 0 || glsFallback,
+    glsFallback: tf.glsUnderdetermined,
+    prior,
   }
   if (post.eta) res.eta = post.eta
 
   if (opts.samples) {
     try {
-      const source = wantPrior || glsFallback ? priorMoments(model, Xs, { fullCov: true }) : post
+      const source = wantPriorSamples ? priorMoments(model, Xs, { fullCov: true }) : post
       const kss = kernelDiag(model.kernel, Xs, { sameSet: false })
       let scale = 0
       for (const v of kss) scale += v / kss.length
@@ -170,82 +195,25 @@ export function computeGrid(
 
   if (opts.cov) {
     const xc = linspace(view[0], view[1], COV_GRID_N)
-    res.cov = posteriorOrPrior(model, points, fromRows(Array.from(xc, (x) => [x])), true).post.cov
+    res.cov = posteriorOrPrior(model, tf, fromRows(Array.from(xc, (x) => [x])), true).cov
   }
   return res
 }
 
-interface TrainingFit {
-  X: Mat
-  /** α = C_X⁻¹ (y − m_X) */
-  alpha: Float64Array
-  /** z = L⁻¹ (y − m_X) */
-  z: Float64Array
-  L: Mat
-  eta?: Float64Array
-}
-
 /**
- * Code 39 steps 1–2 as in core `posterior` (same jitter scale, GLS plug-in mean). Returns null when a GLS mean is
- * underdetermined. Throws GpError('NotPositiveDefinite') like the core.
- */
-function fitTraining(model: GpModel, points: Point[]): TrainingFit | null {
-  const { X, y } = trainingData(points)
-  const n = X.rows
-  const C = kernelMatrix(model.kernel, X, X, { sameSet: true })
-  let diagSum = 0
-  for (let i = 0; i < n; i++) diagSum += C.data[i * n + i]
-  for (let i = 0; i < n; i++) C.data[i * n + i] += model.sigmaN ** 2
-  const { L } = cholesky(C, { jitterScale: diagSum / n })
-  let eta: Float64Array | undefined
-  if (model.mean.kind === 'gls') {
-    try {
-      eta = fitGls(L, basisMatrix(model.mean.basis, X), y).eta
-    } catch (e) {
-      if (isGlsRankDeficient(e)) return null
-      throw e
-    }
-  }
-  const mX = model.mean.kind === 'gls' ? meanValues(model.mean, X, eta) : meanValues(model.mean, X)
-  const r = new Float64Array(n)
-  for (let i = 0; i < n; i++) r[i] = y[i] - mX[i]
-  const zM = solveLower(L, colVec(r))
-  const alpha = solveUpperT(L, zM).data
-  return eta ? { X, alpha, z: zM.data, L, eta } : { X, alpha, z: zM.data, L }
-}
-
-/**
- * Posterior mean only (Code 39 steps 1, 2 and 4; no V = L⁻¹K_starᵀ), for drags when a full update is slow.
+ * Posterior mean only (core `posteriorMean`, no V = L⁻¹K_starᵀ), for drags when a full update is slow.
  * Returns null when a GLS mean is underdetermined (the caller keeps its prior picture).
  */
-export function computeMeanOnly(model: GpModel, points: Point[], xs: Float64Array): Float64Array | null {
+export function computeMeanOnly(model: GpModel, xs: Float64Array, tf: TrainingFit): Float64Array | null {
   const Xs = fromRows(Array.from(xs, (x) => [x]))
-  if (points.length === 0) return model.mean.kind === 'gls' ? new Float64Array(xs.length) : meanValues(model.mean, Xs)
-  const fit = fitTraining(model, points)
-  if (!fit) return null
-  const n = points.length
-  const Kstar = kernelMatrix(model.kernel, Xs, fit.X, { sameSet: false })
-  const mean = model.mean.kind === 'gls' ? meanValues(model.mean, Xs, fit.eta) : meanValues(model.mean, Xs)
-  for (let i = 0; i < xs.length; i++) {
-    let s = 0
-    for (let k = 0; k < n; k++) s += Kstar.data[i * n + k] * fit.alpha[k]
-    mean[i] += s
-  }
-  return mean
+  if (tf.glsUnderdetermined) return null
+  if (!tf.fit) return model.mean.kind === 'gls' ? new Float64Array(xs.length) : meanValues(model.mean, Xs)
+  return posteriorMean(model, tf.fit, tf.X, Xs)
 }
 
-/**
- * Value of the log marginal likelihood −½ zᵀz − Σ log L_ii − (n/2) log 2π (profile likelihood with GLS), without
- * the O(n³) gradient of core `logMarginalLikelihood`. Null without points or with an underdetermined GLS mean.
- */
-export function logMarginalLikelihoodValue(model: GpModel, points: Point[]): number | null {
-  if (points.length === 0) return null
-  const fit = fitTraining(model, points)
-  if (!fit) return null
-  const n = points.length
-  let value = -0.5 * n * Math.log(2 * Math.PI)
-  for (let i = 0; i < n; i++) value -= 0.5 * fit.z[i] * fit.z[i] + Math.log(fit.L.data[i * n + i])
-  return value
+/** log-ML value from the shared fit (core `logMarginalLikelihoodFromFit`); null without a fit. */
+export function logMarginalLikelihoodValue(tf: TrainingFit): number | null {
+  return tf.fit ? logMarginalLikelihoodFromFit(tf.fit) : null
 }
 
 /**
@@ -289,4 +257,21 @@ export function fitYDomain(
   }
   const pad = 0.06 * (hi - lo)
   return scaleLinear().domain([lo - pad, hi + pad]).nice(8).domain() as [number, number]
+}
+
+/** Conditions that raise a notice; a notice fires only when its condition turns from false to true. */
+export interface NoticeFlags {
+  jitter: boolean
+  gls: boolean
+  samples: boolean
+}
+export const NO_NOTICE_FLAGS: NoticeFlags = { jitter: false, gls: false, samples: false }
+
+export function noticeTransitions(
+  prev: NoticeFlags,
+  r: Pick<GridResult, 'jitter' | 'glsFallback' | 'samplesFailed'>,
+): { next: NoticeFlags; raised: (keyof NoticeFlags)[] } {
+  const next: NoticeFlags = { jitter: r.jitter > 0, gls: r.glsFallback, samples: r.samplesFailed }
+  const raised = (Object.keys(next) as (keyof NoticeFlags)[]).filter((k) => next[k] && !prev[k])
+  return { next, raised }
 }

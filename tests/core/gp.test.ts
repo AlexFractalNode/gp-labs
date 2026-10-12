@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { GpError } from '../../src/core/errors'
 import {
   drawSamples,
+  fitModel,
+  logMarginalLikelihoodFromFit,
+  posteriorMean,
   logMarginalLikelihood,
   modelParams,
   observationSd,
@@ -308,5 +311,50 @@ describe('samples', () => {
     const p = posterior(model(1, 1, 1e-6), col([0]), Float64Array.from([1]), col([0, 0, 1]), { fullCov: true })
     const s = drawSamples(p.mean, p.cov!, standardNormals(createRng(1), 4, 3), 1)
     for (const v of s.data) expect(Number.isFinite(v)).toBe(true)
+  })
+})
+
+describe('reusable fit (fitModel, posteriorMean, logMarginalLikelihoodFromFit)', () => {
+  const X = col([-1, -0.5, 0, 0.5, 1.2])
+  const y = Float64Array.from([0.5, 1.2, 0.8, -0.3, 0.1])
+  const Xs = col([-2, -0.7, 0.3, 2.5])
+  const means: MeanSpec[] = [
+    { kind: 'zero' },
+    { kind: 'constant', c: 0.4 },
+    { kind: 'linear', a: 0.2, b: [-0.3] },
+    { kind: 'gls', basis: 'linear' },
+  ]
+
+  it('posterior with a passed fit, posteriorMean and the value-only log-ML equal the one-shot core results', () => {
+    for (const mean of means) {
+      const m = model(1.3, 0.6, 0.2, mean)
+      const f = fitModel(m, X, y)
+      const ref = posterior(m, X, y, Xs, { fullCov: true })
+      const withFit = posterior(m, X, y, Xs, { fullCov: true, fit: f })
+      expect(maxAbs(withFit.mean, ref.mean)).toBeLessThan(1e-14)
+      expect(maxAbs(withFit.sdF, ref.sdF)).toBeLessThan(1e-14)
+      expect(maxAbs(posteriorMean(m, f, X, Xs), ref.mean)).toBeLessThan(1e-12)
+      expect(logMarginalLikelihoodFromFit(f)).toBeCloseTo(logMarginalLikelihood(m, X, y).value, 12)
+    }
+  })
+
+  it('fitModel validates its input and reports an underdetermined GLS mean', () => {
+    const m = model(1, 1, 0.1)
+    expectThrowsCode(() => fitModel(m, zeros(0, 1), new Float64Array(0)), 'InvalidInput')
+    expectThrowsCode(() => fitModel(m, col([0]), Float64Array.from([NaN])), 'InvalidInput')
+    expectThrowsCode(() => fitModel({ ...m, sigmaN: -1 }, col([0]), Float64Array.from([1])), 'InvalidInput')
+    try {
+      fitModel(model(1, 1, 0.1, { kind: 'gls', basis: 'linear' }), col([0]), Float64Array.from([1]))
+      expect.unreachable()
+    } catch (e) {
+      expect((e as GpError).details?.reason).toBe('glsRankDeficient')
+    }
+  })
+
+  it('rejects a fit that does not belong to X', () => {
+    const m = model(1, 1, 0.1)
+    const f = fitModel(m, col([0, 1]), Float64Array.from([1, 2]))
+    expectThrowsCode(() => posteriorMean(m, f, col([0]), Xs), 'InvalidInput')
+    expectThrowsCode(() => posterior(m, col([0]), Float64Array.from([1]), Xs, { fit: f }), 'InvalidInput')
   })
 })

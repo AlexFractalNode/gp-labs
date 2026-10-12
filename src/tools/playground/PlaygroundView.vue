@@ -8,7 +8,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch 
 import { useI18n, type MessageKey } from '../../i18n'
 import { notify } from '../../notify'
 import { useRoute } from '../../router'
-import { buildHash, KERNEL_PARAM } from '../../urlState'
+import { buildHash, KERNEL_PARAM, parseHash } from '../../urlState'
 import { GpError } from '../../core/errors'
 import { modelParams, withModelLogParams, type GpModel } from '../../core/gp'
 import { kernelTex, type KernelSpec } from '../../core/kernels'
@@ -26,18 +26,24 @@ import RefBadge from '../../ui/RefBadge.vue'
 import CursorLayer from './CursorLayer.vue'
 import Inspector from './Inspector.vue'
 import { inspectAt, type InspectResult } from './inspect'
+import { startTween, type TweenHandle } from './tween'
 import { loadPreset, type PlaygroundState } from './presets'
 import {
   computeGrid,
   computeMeanOnly,
+  fitTraining,
   logMarginalLikelihoodValue,
   fitYDomain,
   MAX_POINTS,
+  NO_NOTICE_FLAGS,
+  noticeTransitions,
   resolveKernel,
   SAMPLE_COUNT,
   SIGMA_N_BOUNDS,
   type GridResult,
+  type NoticeFlags,
   type Point,
+  type TrainingFit,
 } from './compute'
 
 const { lang, t } = useI18n()
@@ -155,13 +161,32 @@ const interacting = computed(() => pointerActive.value || tweening.value)
 
 const errorCode = (e: unknown) => (e instanceof GpError ? e.code : 'Error')
 
+/**
+ * One core fit (Cholesky of C_X) per (model, points), shared by grid, mean-only path, log-ML and inspector.
+ * `model` and `points` are replaced on every change, so identity is the cache key.
+ */
+let fitCache: { model: GpModel; points: Point[]; training: TrainingFit } | null = null
+function currentFit(): TrainingFit {
+  const m = model.value
+  const pts = points.value
+  if (fitCache && fitCache.model === m && fitCache.points === pts) return fitCache.training
+  const training = fitTraining(m, pts) // may throw GpError (e.g. NotPositiveDefinite)
+  fitCache = { model: m, points: pts, training }
+  return training
+}
+
+/** A mean-only update happened since the last full recompute (bands, samples and log-ML are behind). */
+let fullPending = false
+let noticeFlags: NoticeFlags = NO_NOTICE_FLAGS
+
 function recompute() {
   const m = model.value
   const pts = points.value
   const meanOnly = interacting.value && lastFullMs > SLOW_MS && grid.value !== null && plotError.value === null
   try {
     if (meanOnly) {
-      const mm = computeMeanOnly(m, pts, grid.value!.xs)
+      fullPending = true
+      const mm = computeMeanOnly(m, grid.value!.xs, currentFit())
       if (mm) {
         shownMean.value = mm
         stale.value = true
@@ -173,15 +198,19 @@ function recompute() {
       samples: layers.samples ? sampleSource.value : null,
       seed: seed.value,
       cov: covOpen.value,
+      training: currentFit(),
     })
     lastFullMs = performance.now() - t0
+    fullPending = false
     grid.value = r
     shownMean.value = r.mean
     stale.value = false
     plotError.value = null
-    if (r.jitter > 0) notify('notice.jitter', { jitter: r.jitter.toExponential(1) })
-    if (r.glsFallback) notify('notice.glsUnderdetermined')
-    if (r.samplesFailed) notify('notice.samplesFailed')
+    const { next, raised } = noticeTransitions(noticeFlags, r)
+    noticeFlags = next
+    if (raised.includes('jitter')) notify('notice.jitter', { jitter: formatJitter(r.jitter) })
+    if (raised.includes('gls')) notify('notice.glsUnderdetermined')
+    if (raised.includes('samples')) notify('notice.samplesFailed')
     logMLTimer.request()
   } catch (e) {
     if (!(e instanceof GpError)) console.error(e)
@@ -192,13 +221,13 @@ const recomputer = throttle(recompute, MIN_GAP_MS)
 
 function updateLogML() {
   try {
-    logML.value = logMarginalLikelihoodValue(model.value, points.value)
+    logML.value = logMarginalLikelihoodValue(currentFit())
   } catch (e) {
     if (!(e instanceof GpError)) console.error(e)
     logML.value = null
   }
 }
-// Debounced: one more O(n³) factorisation that is not needed while sliders move.
+// Debounced: cheap with the shared fit, but not needed while sliders move.
 const logMLTimer = (() => {
   let timer: ReturnType<typeof setTimeout> | null = null
   return {
@@ -225,7 +254,8 @@ const playgroundState = (): PlaygroundState => ({
 })
 function inspect() {
   try {
-    inspection.value = inspectAt(playgroundState(), inspectX.value)
+    const fit = currentFit().fit
+    inspection.value = inspectAt(playgroundState(), inspectX.value, fit ? { fit } : undefined)
     inspectError.value = null
   } catch (e) {
     if (!(e instanceof GpError)) console.error(e)
@@ -246,7 +276,7 @@ watch(sigmaN, (v) => {
 function onPointerUp() {
   if (!pointerActive.value) return
   pointerActive.value = false
-  if (stale.value) recomputer.request()
+  if (fullPending) recomputer.request()
 }
 
 // ------------------------------------------------------------------ loading
@@ -294,6 +324,8 @@ function load() {
   hoverX.value = null
   logML.value = null
   lastFullMs = 0
+  fullPending = false
+  noticeFlags = NO_NOTICE_FLAGS
 
   fitAxes()
   recomputer.now()
@@ -323,7 +355,6 @@ onBeforeUnmount(() => {
   inspector.cancel()
   logMLTimer.cancel()
   cancelOptimize()
-  if (tweenFrame !== null) cancelAnimationFrame(tweenFrame)
 })
 
 // ------------------------------------------------------------------ points
@@ -339,17 +370,21 @@ function addPoint(p: Point) {
     notify('notice.maxPoints')
     return
   }
+  cancelOptimize()
   points.value = [...points.value, clampPoint(p)]
 }
 function dragPoint(i: number, p: Point) {
+  cancelOptimize()
   const next = points.value.slice()
   next[i] = clampPoint(p)
   points.value = next
 }
 function removePoint(i: number) {
+  cancelOptimize()
   points.value = points.value.filter((_, k) => k !== i)
 }
 function clearPoints() {
+  cancelOptimize()
   points.value = []
 }
 /** Many points: smaller dots and hit targets, drawn below the curves. */
@@ -362,8 +397,9 @@ const py = computed(() => points.value.map((p) => p.y))
 function onHover(p: { x: number } | null) {
   if (p) hoverX.value = p.x
 }
+/** Rewrites the hash query from the live location (replaceState does not update the router state). */
 function setHash(mutate: (p: URLSearchParams) => void, replace: boolean) {
-  const p = new URLSearchParams(route.value.params)
+  const p = parseHash(window.location.hash).params
   mutate(p)
   const hash = buildHash('playground', Object.fromEntries(p))
   if (replace) history.replaceState(history.state, '', hash)
@@ -388,8 +424,9 @@ function switchHyper(name: string) {
 
 const opt = reactive({ running: false, run: 0, atBound: [] as string[] })
 let handle: OptimizeHandle | null = null
-let tweenFrame: number | null = null
+let tween: TweenHandle | null = null
 
+/** Stops a running optimisation and its slider tween; neither is applied afterwards. */
 function cancelOptimize() {
   if (handle) {
     const h = handle
@@ -397,11 +434,27 @@ function cancelOptimize() {
     h.cancel()
   }
   opt.running = false
+  if (tween) {
+    tween.cancel()
+    tween = null
+    tweening.value = false
+    recomputer.request()
+  }
 }
-watch([points, meanKind], cancelOptimize)
+watch(meanKind, cancelOptimize)
+
+/** User edits of the kernel or the noise cancel a running optimisation and its tween. */
+function onKernelInput(spec: KernelSpec) {
+  cancelOptimize()
+  kernel.value = spec
+}
+function onSigmaInput(v: number) {
+  cancelOptimize()
+  sigmaN.value = v
+}
 
 function optimize() {
-  if (points.value.length === 0 || opt.running) return
+  if (points.value.length === 0 || opt.running || optimizeBlocked.value) return
   cancelOptimize()
   const job = {
     // Plain copies: reactive proxies are not structured-cloneable.
@@ -437,14 +490,12 @@ function optimize() {
   )
 }
 
-const ease = (u: number) => (u < 0.5 ? 4 * u * u * u : 1 - (-2 * u + 2) ** 3 / 2)
-
 /** Animates kernel parameters and sigma_n in log space to the optimum (400 ms; instant with reduced motion). */
 function tweenTo(target: GpModel) {
   const from = modelParams(model.value, 1)
   const to = modelParams(target, 1)
   const finish = () => {
-    tweenFrame = null
+    tween = null
     kernel.value = target.kernel
     sigmaN.value = target.sigmaN
     tweening.value = false
@@ -453,18 +504,17 @@ function tweenTo(target: GpModel) {
   const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
   if (reduced || from.names.join() !== to.names.join()) return finish()
   tweening.value = true
-  const t0 = performance.now()
-  const step = (now: number) => {
-    const u = Math.min(1, (now - t0) / TWEEN_MS)
-    if (u >= 1) return finish()
-    const e = ease(u)
-    const lv = from.logValues.map((v, i) => v + (to.logValues[i] - v) * e)
-    const m = withModelLogParams(model.value, 1, lv)
-    kernel.value = m.kernel
-    sigmaN.value = m.sigmaN
-    tweenFrame = requestAnimationFrame(step)
-  }
-  tweenFrame = requestAnimationFrame(step)
+  tween = startTween({
+    from: from.logValues,
+    to: to.logValues,
+    durationMs: TWEEN_MS,
+    apply: (lv) => {
+      const m = withModelLogParams(model.value, 1, lv)
+      kernel.value = m.kernel
+      sigmaN.value = m.sigmaN
+    },
+    finish,
+  })
 }
 
 // ------------------------------------------------------------------ display
@@ -480,10 +530,18 @@ const etaText = computed(() => {
 const kernelFormula = computed(() => {
   try {
     return kernelTex(kernel.value, { inputDim: 1 })
-  } catch {
+  } catch (e) {
+    if (!(e instanceof GpError)) throw e
     return ''
   }
 })
+
+/** Jitter in the current language, e.g. DE "1E-9" / "1,5E-9". */
+const formatJitter = (j: number) =>
+  new Intl.NumberFormat(lang.value, { notation: 'scientific', maximumFractionDigits: 1 }).format(j)
+
+/** With an underdetermined GLS mean there is no likelihood to optimise. */
+const optimizeBlocked = computed(() => grid.value?.glsFallback === true)
 
 const sigmaRange = computed(() => ({
   min: Math.max(SIGMA_N_BOUNDS[0], sigmaAnchor.value * Math.exp(-4)),
@@ -530,9 +588,9 @@ const legend = computed<LegendItem[]>(() => {
       swatch: 'thin',
       variant: 'sample',
     },
-    { key: 'priorMean', label: t('playground.layer.priorMean'), swatch: 'dot-line', variant: 'prior' },
+    { key: 'priorMean', label: t('playground.layer.priorMean'), swatch: 'dash', variant: 'prior' },
   ]
-  if (truth.value) items.push({ key: 'truth', label: t('playground.layer.truth'), swatch: 'dash', variant: 'truth' })
+  if (truth.value) items.push({ key: 'truth', label: t('playground.layer.truth'), swatch: 'dot-line', variant: 'truth' })
   return items
 })
 
@@ -696,7 +754,9 @@ const meanLabel = (k: MeanKind): MessageKey => `playground.meanKind.${k}` as Mes
             <button
               type="button"
               class="btn primary"
-              :disabled="points.length === 0 || opt.running"
+              :disabled="points.length === 0 || opt.running || optimizeBlocked"
+              :aria-describedby="optimizeBlocked ? 'optimize-blocked' : undefined"
+              data-action="optimize"
               @click="optimize"
             >
               {{ t('playground.optimize') }}
@@ -706,6 +766,9 @@ const meanLabel = (k: MeanKind): MessageKey => `playground.meanKind.${k}` as Mes
             </button>
             <span v-if="opt.running" class="muted" role="status">
               {{ t('playground.optimizing', { run: Math.max(opt.run, 1), total: RESTARTS + 1 }) }}
+            </span>
+            <span v-else-if="optimizeBlocked" id="optimize-blocked" class="muted">
+              {{ t('playground.optimizeGlsBlocked') }}
             </span>
             <span v-else-if="opt.atBound.length" class="muted">
               {{ t('playground.atBound', { names: opt.atBound.join(', ') }) }}
@@ -760,13 +823,14 @@ const meanLabel = (k: MeanKind): MessageKey => `playground.meanKind.${k}` as Mes
               </button>
             </div>
           </div>
-          <ParamSliders :spec="kernel" :input-dim="1" @update:spec="kernel = $event" />
+          <ParamSliders :spec="kernel" :input-dim="1" @update:spec="onKernelInput" />
           <LogSlider
-            v-model="sigmaN"
+            :model-value="sigmaN"
             class="noise"
             :min="sigmaRange.min"
             :max="sigmaRange.max"
             :label="t('param.sigmaN')"
+            @update:model-value="onSigmaInput"
           />
         </section>
 
@@ -875,6 +939,15 @@ const meanLabel = (k: MeanKind): MessageKey => `playground.meanKind.${k}` as Mes
 .stale {
   opacity: 0.45;
 }
+/* Brief: the specified mean m(x) is dashed; the true function is dotted, so the two stay distinct. */
+.plot-wrap :deep([data-variant='prior'] path) {
+  stroke-dasharray: 8 5;
+}
+.plot-wrap :deep([data-variant='truth'] path) {
+  stroke-dasharray: 0.5 5;
+  stroke-linecap: round;
+  stroke-width: 2.6;
+}
 .dense :deep(.dot) {
   r: 2.6px;
   stroke-width: 0.6;
@@ -975,11 +1048,12 @@ const meanLabel = (k: MeanKind): MessageKey => `playground.meanKind.${k}` as Mes
 }
 .sw-dash {
   stroke-width: 2;
-  stroke-dasharray: 7 4;
+  stroke-dasharray: 8 5;
 }
 .sw-dot-line {
-  stroke-width: 2;
-  stroke-dasharray: 2 3;
+  stroke-width: 2.6;
+  stroke-dasharray: 0.5 5;
+  stroke-linecap: round;
 }
 
 .toolbar {

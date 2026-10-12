@@ -71,8 +71,10 @@ function validate(model: GpModel, X: Mat, y: Float64Array, Xs?: Mat): void {
   if (Xs) assertFinite(Xs.data, 'xStar')
 }
 
-interface Fit {
+/** Factorisation of C_X for one (model, X, y); reusable for posterior, mean-only updates and the log-ML value. */
+export interface Fit {
   L: Mat
+  /** Jitter added to C_X by the Cholesky fallback (0 if none). */
   jitter: number
   /** α = C_X⁻¹ (y − m_X) */
   alpha: Float64Array
@@ -81,7 +83,17 @@ interface Fit {
   eta?: Float64Array
 }
 
-/** Steps 1–2: L = chol(C_X), L z = y − m_X, Lᵀ α = z. With GLS, m_X = H η̂ (plug-in, `fitGls`). */
+/**
+ * Steps 1–2: L = chol(C_X), L z = y − m_X, Lᵀ α = z. With GLS, m_X = H η̂ (plug-in, `fitGls`).
+ * Validates the inputs and needs at least one training row. Throws GpError('InvalidInput') (incl. reason
+ * 'glsRankDeficient' for an underdetermined GLS mean) or GpError('NotPositiveDefinite').
+ */
+export function fitModel(model: GpModel, X: Mat, y: Float64Array): Fit {
+  validate(model, X, y)
+  if (X.rows === 0) throw new GpError('InvalidInput', { reason: 'noTrainingData' })
+  return fit(model, X, y)
+}
+
 function fit(model: GpModel, X: Mat, y: Float64Array): Fit {
   const n = X.rows
   const C = kernelMatrix(model.kernel, X, X, { sameSet: true })
@@ -143,26 +155,61 @@ export function priorMoments(model: GpModel, Xs: Mat, opts?: { fullCov?: boolean
   return out
 }
 
+/** Step 4: f̄* = m* + K_star α. */
+function meanFromKstar(model: GpModel, f: Fit, Kstar: Mat, Xs: Mat): Float64Array {
+  const n = Kstar.cols
+  const mean = model.mean.kind === 'gls' ? meanValues(model.mean, Xs, f.eta) : meanValues(model.mean, Xs)
+  for (let i = 0; i < Xs.rows; i++) {
+    let s = 0
+    for (let k = 0; k < n; k++) s += Kstar.data[i * n + k] * f.alpha[k]
+    mean[i] += s
+  }
+  return mean
+}
+
+/**
+ * Posterior mean only (Code 39 steps 1, 2 and 4, without V = L⁻¹K_starᵀ) from a `fitModel` result of the same
+ * model and training inputs X.
+ */
+export function posteriorMean(model: GpModel, f: Fit, X: Mat, Xs: Mat): Float64Array {
+  if (Xs.cols !== X.cols) throw new GpError('InvalidInput', { reason: 'inputDimMismatch', x: X.cols, xs: Xs.cols })
+  if (f.alpha.length !== X.rows) throw new GpError('InvalidInput', { reason: 'fitMismatch', rows: X.rows, fit: f.alpha.length })
+  assertFinite(Xs.data, 'xStar')
+  return meanFromKstar(model, f, kernelMatrix(model.kernel, Xs, X, { sameSet: false }), Xs)
+}
+
+/** Value of the log ML −½ zᵀz − Σ log L_ii − (n/2) log 2π from a fit (no O(n³) gradient). */
+export function logMarginalLikelihoodFromFit(f: Fit): number {
+  const n = f.z.length
+  let value = -0.5 * n * Math.log(2 * Math.PI)
+  for (let i = 0; i < n; i++) value -= 0.5 * f.z[i] * f.z[i] + Math.log(f.L.data[i * n + i])
+  return value
+}
+
 /**
  * Posterior of f at Xs (Code 39, steps 1–5): f̄* = m* + K_star α, Cov(f*) = K_star2 − VᵀV with L V = K_starᵀ.
- * With 0 training rows it returns priorMoments. With a GLS mean, m = Hη̂ (plug-in) and `eta` is set.
+ * With 0 training rows it returns priorMoments. `opts.fit` (a `fitModel` result for the same model, X and y)
+ * skips steps 1–2. With a GLS mean, m = Hη̂ (plug-in) and `eta` is set.
  * Throws GpError('InvalidInput') for mismatched shapes / non-finite inputs, GpError('NotPositiveDefinite')
  * if C_X cannot be factorised even with jitter.
  */
-export function posterior(model: GpModel, X: Mat, y: Float64Array, Xs: Mat, opts?: { fullCov?: boolean }): Posterior {
+export function posterior(
+  model: GpModel,
+  X: Mat,
+  y: Float64Array,
+  Xs: Mat,
+  opts?: { fullCov?: boolean; fit?: Fit },
+): Posterior {
   validate(model, X, y, Xs)
   if (X.rows === 0) return priorMoments(model, Xs, opts)
   const n = X.rows
   const ns = Xs.rows
-  const { L, jitter, alpha, eta } = fit(model, X, y)
+  const f = opts?.fit ?? fit(model, X, y)
+  if (f.alpha.length !== n) throw new GpError('InvalidInput', { reason: 'fitMismatch', rows: n, fit: f.alpha.length })
+  const { L, jitter, eta } = f
 
   const Kstar = kernelMatrix(model.kernel, Xs, X, { sameSet: false }) // n* × n
-  const mean = model.mean.kind === 'gls' ? meanValues(model.mean, Xs, eta) : meanValues(model.mean, Xs)
-  for (let i = 0; i < ns; i++) {
-    let s = 0
-    for (let k = 0; k < n; k++) s += Kstar.data[i * n + k] * alpha[k]
-    mean[i] += s
-  }
+  const mean = meanFromKstar(model, f, Kstar, Xs)
   const V = solveLower(L, transpose(Kstar)) // n × n*
 
   let cov: Mat | undefined
@@ -202,10 +249,9 @@ export function logMarginalLikelihood(
   validate(model, X, y)
   const n = X.rows
   if (n === 0) throw new GpError('InvalidInput', { reason: 'noTrainingData' })
-  const { L, jitter, alpha, z } = fit(model, X, y)
-
-  let value = -0.5 * n * Math.log(2 * Math.PI)
-  for (let i = 0; i < n; i++) value -= 0.5 * z[i] * z[i] + Math.log(L.data[i * n + i])
+  const f = fit(model, X, y)
+  const { L, jitter, alpha } = f
+  const value = logMarginalLikelihoodFromFit(f)
 
   const Cinv = inverseFromCholesky(L)
   const dK = kernelGradients(model.kernel, X)
