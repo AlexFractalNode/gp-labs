@@ -52,8 +52,14 @@ interface Pending {
 const defaultCreateWorker = (): Worker =>
   new Worker(new URL('./gp.worker.ts', import.meta.url), { type: 'module' })
 
+/**
+ * A client with its own worker. Separate clients never cancel each other's runs (the Daten-Lab has its own, so a
+ * Playground optimisation does not abort a lab run). `dispose` cancels the pending run and terminates the worker;
+ * a later start creates a new worker.
+ */
 export function createOptimizeClient(createWorker: () => Worker = defaultCreateWorker): {
   startOptimize(job: OptimizeJob, onProgress: (p: OptimizeProgress) => void): OptimizeHandle
+  dispose(): void
 } {
   let worker: Worker | null = null
   let pending: Pending | null = null
@@ -137,7 +143,12 @@ export function createOptimizeClient(createWorker: () => Worker = defaultCreateW
     return { runId, result, cancel: () => cancelRun(runId) }
   }
 
-  return { startOptimize }
+  function dispose(): void {
+    if (pending) cancelRun(pending.runId)
+    dropWorker()
+  }
+
+  return { startOptimize, dispose }
 }
 
 let defaultClient: ReturnType<typeof createOptimizeClient> | null = null

@@ -54,7 +54,7 @@ const tiles = computed(() => {
 })
 
 const nTest = computed(() => props.run?.test.yTrue.length ?? 0)
-const coveredCount = computed(() => Math.round((props.run?.metrics.coverage2sd ?? 0) * nTest.value))
+const coveredCount = computed(() => props.run?.metrics.coveredCount ?? 0)
 /** One binomial standard error of a 95.45 % coverage with nTest points, in percentage points. */
 const coverageSe = computed(() =>
   nTest.value > 0 ? f.value.pp.format(100 * Math.sqrt((NOMINAL_2SD * (1 - NOMINAL_2SD)) / nTest.value)) : '',
@@ -129,6 +129,23 @@ const sliceY = computed<[number, number]>(() => {
   const s = slice.value
   if (!s || !s.ok) return [0, 1]
   return extent([s.lowerY, s.upperY, s.mean], 0.06)
+})
+/** Share of the band half-width below which the s_f and s_y bands count as indistinguishable. */
+const SAME_BAND_REL = 0.01
+/**
+ * Largest gap (original units) between the s_f and s_y band limits, when it is below SAME_BAND_REL of the largest
+ * s_y half-width (small σₙ: the bands coincide in the plot and the legend says so); null otherwise.
+ */
+const bandGap = computed<number | null>(() => {
+  const s = slice.value
+  if (!s || !s.ok) return null
+  let gap = 0
+  let half = 0
+  for (let i = 0; i < s.x.length; i++) {
+    gap = Math.max(gap, Math.abs(s.upperY[i] - s.upperF[i]), Math.abs(s.lowerF[i] - s.lowerY[i]))
+    half = Math.max(half, (s.upperY[i] - s.lowerY[i]) / 2)
+  }
+  return Number.isFinite(gap) && half > 0 && gap < SAME_BAND_REL * half ? gap : null
 })
 const sliceX = computed<[number, number]>(() => {
   const s = slice.value
@@ -299,6 +316,9 @@ const metaOf = (r: RunResult) => runMeta(r)
                 <li><span class="sw solid" data-variant="f" />{{ t('datalab.result.legendF') }}<template v-if="logY">, {{ t('datalab.result.asym') }}</template></li>
                 <li><span class="sw hatch" data-variant="y" />{{ t('datalab.result.legendY') }}<template v-if="logY">, {{ t('datalab.result.asym') }}</template></li>
               </ul>
+              <p v-if="bandGap !== null" class="muted small" data-note="sf-equals-sy">
+                {{ t('datalab.result.sfApproxSy', { d: f.hyper.format(bandGap) }) }}
+              </p>
               <p class="muted small">{{ t('datalab.result.sliceHint', { feature: featureNames[sliceFeature] ?? '' }) }}</p>
             </template>
             <p v-else class="error-box" role="alert">{{ t('datalab.result.sliceError') }}</p>

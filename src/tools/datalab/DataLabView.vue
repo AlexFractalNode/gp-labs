@@ -13,7 +13,7 @@ import { inferColumns, parseCsv, type ColumnInfo, type Table } from '../../core/
 import { GpError } from '../../core/errors'
 import { kernelTex, MAX_ARD_DIM, type KernelSpec } from '../../core/kernels'
 import { createRng } from '../../core/rng'
-import { startOptimize, type OptimizeHandle } from '../../worker/client'
+import { createOptimizeClient, type OptimizeHandle } from '../../worker/client'
 import { inputDimOf } from '../kernels/compute'
 import RefBadge from '../../ui/RefBadge.vue'
 import {
@@ -57,6 +57,11 @@ const STEPS: { id: StepId; chapter: string; code: string }[] = [
 const MAX_FILE_MB = 20
 const NOTEBOOK_FEATURES = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6']
 const MAX_ITER = 500
+/**
+ * Notebook template (Code 91) as sklearn writes it, RBF(ℓ) · DotProduct(σ₀): the core kernel with its fixed values
+ * substituted (RBF amplitude σ = 1, linear location c = 0); free are ℓ, σ₀ and σₙ.
+ */
+const NOTEBOOK_TEX = String.raw`k(x,x') = \exp\left(-\frac{\lVert x - x' \rVert^2}{2\ell^2}\right) \cdot \left(\sigma_0^2 + x^\top x'\right)`
 
 const active = ref<StepId>('data')
 
@@ -220,18 +225,30 @@ const split = computed<Split | null>(() => {
 const template = ref<TemplateChoice>('notebook')
 const restarts = ref(5)
 
-/** Kernel from the Kernel-Baukasten (`?kernel=`), offered when it decodes to a valid 1D spec. */
-const urlKernel = computed<KernelSpec | null>(() => {
-  const k = route.value.params.get(KERNEL_PARAM)
-  if (k === null) return null
-  const spec = decodeKernel(k)
-  return spec !== null && inputDimOf(spec) === 1 ? spec : null
-})
+/**
+ * Kernel from the Kernel-Baukasten (`?kernel=`), offered when it decodes to a valid 1D spec. Read only while the
+ * lab's own route is shown: the cached (KeepAlive) lab must not react to the `?kernel=` of other tools.
+ */
+const urlKernel = shallowRef<KernelSpec | null>(null)
+watch(
+  route,
+  (r) => {
+    if (r.route !== 'datalab') return
+    const k = r.params.get(KERNEL_PARAM)
+    const spec = k === null ? null : decodeKernel(k)
+    urlKernel.value = spec !== null && inputDimOf(spec) === 1 ? spec : null
+  },
+  { immediate: true },
+)
+/** The template chosen before a URL kernel switched to 'baukasten'; restored when that kernel goes away. */
+let templateBeforeUrl: TemplateChoice = 'notebook'
 watch(
   urlKernel,
   (spec) => {
-    if (spec) template.value = 'baukasten'
-    else if (template.value === 'baukasten') template.value = 'notebook'
+    if (spec) {
+      if (template.value !== 'baukasten') templateBeforeUrl = template.value
+      template.value = 'baukasten'
+    } else if (template.value === 'baukasten') template.value = templateBeforeUrl
   },
   { immediate: true },
 )
@@ -250,9 +267,9 @@ const modelPreview = computed<ModelPreview | null>(() => {
   if (!dataset.value || tv === null) return null
   try {
     const { model, notices } = buildModelWithNotices(tv, d.value)
-    let tex: string | null = null
+    let tex: string | null = tv === 'notebook' ? NOTEBOOK_TEX : null
     try {
-      tex = kernelTex(model.kernel, { inputDim: d.value })
+      tex ??= kernelTex(model.kernel, { inputDim: d.value })
     } catch (e) {
       if (!(e instanceof GpError)) throw e
     }
@@ -268,6 +285,8 @@ const modelPreview = computed<ModelPreview | null>(() => {
 const runView = reactive<RunView>({ state: 'empty', run: 0, total: 0, best: NaN, problem: null, lastId: 0, lastLogML: NaN })
 const current = shallowRef<RunResult | null>(null)
 let handle: OptimizeHandle | null = null
+/** Own worker: a Playground optimisation (shared default client) never cancels a lab run. */
+const optimizer = createOptimizeClient()
 
 const canStart = computed(
   () => dataset.value !== null && split.value !== null && templateValue.value !== null && modelPreview.value?.problem === null,
@@ -302,7 +321,7 @@ function startRun() {
     return
   }
   // startOptimize cancels a running optimisation; its rejection is ignored below (handle !== h).
-  const h = startOptimize(job, (p) => {
+  const h = optimizer.startOptimize(job, (p) => {
     if (handle !== h) return
     runView.run = p.restart + 1
     runView.best = p.logML
@@ -342,9 +361,8 @@ function cancelRun() {
 }
 
 onBeforeUnmount(() => {
-  const h = handle
   handle = null
-  h?.cancel()
+  optimizer.dispose()
 })
 
 function showRun(r: RunResult) {

@@ -135,4 +135,32 @@ describe('worker client', () => {
     await expect(a.result).rejects.toMatchObject({ code: 'OptimizerFailed', details: { reason: 'messageError' } })
     expect(workers[0].terminated).toBe(true)
   })
+
+  it('dispose cancels the pending run and terminates the worker; a later start creates a new one', async () => {
+    const { workers, client } = setup()
+    const a = client.startOptimize(job(1), () => {})
+    const aOutcome = a.result.then(
+      () => 'resolved',
+      (e: unknown) => e,
+    )
+    client.dispose()
+    expect(workers[0].terminated).toBe(true)
+    const e = await aOutcome
+    expect(e).toBeInstanceOf(GpError)
+    expect((e as GpError).details?.cancelled).toBe(true)
+    const b = client.startOptimize(job(2), () => {})
+    expect(workers).toHaveLength(2)
+    workers[1].emit({ type: 'done', runId: b.runId, model: model(2), logML: 0, atBound: [] })
+    await expect(b.result).resolves.toMatchObject({ logML: 0 })
+  })
+
+  it('separate clients do not cancel each other', async () => {
+    const one = setup()
+    const two = setup()
+    const a = one.client.startOptimize(job(1), () => {})
+    two.client.startOptimize(job(2), () => {})
+    expect(one.workers[0].terminated).toBe(false)
+    one.workers[0].emit({ type: 'done', runId: a.runId, model: model(1), logML: 3, atBound: [] })
+    await expect(a.result).resolves.toMatchObject({ logML: 3 })
+  })
 })

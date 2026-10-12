@@ -47,6 +47,9 @@ const running = computed(() => props.run.state === 'loading')
         <div v-if="preview?.tex" class="formula-box" :aria-label="t('datalab.model.formula')">
           <span class="field-label">{{ t('datalab.model.formula') }}</span>
           <Formula :tex="preview.tex" display />
+          <p v-if="template === 'notebook'" class="muted small fixed" data-note="notebook-fixed">
+            {{ t('datalab.model.notebookFixed') }}
+          </p>
         </div>
         <div v-if="template === 'baukasten'" class="note">
           <strong>{{ t('datalab.model.baukastenTitle') }}</strong>
@@ -124,6 +127,9 @@ const running = computed(() => props.run.state === 'loading')
   background: var(--bg);
   font-size: 0.9rem;
   overflow-x: auto;
+}
+.fixed {
+  margin: 0.25rem 0 0;
 }
 .plain {
   margin: 0.25rem 0 0;

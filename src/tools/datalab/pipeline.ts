@@ -78,6 +78,8 @@ export interface RunResult {
     rmseTest: number
     /** Fraction of test points inside ±2·sdY (nominal 95.45 %). */
     coverage2sd: number
+    /** Number of test points inside ±2·sdY (coverage2sd = coveredCount / nTest). */
+    coveredCount: number
     calibration: { level: number; observed: number }[]
   }
   test: {
@@ -370,6 +372,7 @@ export function evaluateRun(cfg: RunConfig, fitted: GpModel, logML: number, atBo
       rmseTrain: rmse(p.yTrainOrig, yPredTrain),
       rmseTest: rmse(yTrue, yPred),
       coverage2sd: coverage(yTrue, lowerY, upperY),
+      coveredCount: yTrue.reduce((k, v, i) => (v >= lowerY[i] && v <= upperY[i] ? k + 1 : k), 0),
       calibration: calibration(yTrueModel, post.mean, post.sdY),
     },
     test: { yTrue, yPred, lowerY, upperY, sdF: Array.from(post.sdF), sdY: Array.from(post.sdY) },

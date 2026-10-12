@@ -267,6 +267,7 @@ describe('evaluateRun details', () => {
     relClose(run.test.lowerY, [-1, -1, -1, -1], 1e-8)
     relClose(run.test.upperY, [3, 3, 3, 3], 1e-8)
     expect(run.metrics.coverage2sd).toBe(0.5)
+    expect(run.metrics.coveredCount).toBe(2)
   })
 
   it('log target: yPred = exp(m·yScale + yMean) and the bounds are exp of m ± 2·sdY', () => {
