@@ -17,6 +17,8 @@ export interface KernelPreset {
   /** Textbook section and notebook code number ('' when the preset has no notebook cell). */
   ref: { chapter: string; code: string }
   group: PresetGroup
+  /** Start seed of the sample normals u (default 1). */
+  seed?: number
 }
 
 const SQRT2 = Math.SQRT2
@@ -83,6 +85,8 @@ export const KERNEL_PRESETS: Readonly<Record<string, KernelPreset>> = {
   'ard-2d': {
     ...gallery(one({ kind: 'rbf', params: { sigma: 1, ell_0: 0.2, ell_1: 1 }, ard: true }), '13.5', '68', [0, 1]),
     domain2: [1, 3],
+    // Seed 1 happens to give an all-positive sample; seed 2 crosses zero and shows the fast x₁ / slow x₂ change.
+    seed: 2,
   },
   'active-dim': {
     ...gallery(one({ ...rbf(1, 0.2), activeDims: [0] }), '13.5', '69', [0, 1]),

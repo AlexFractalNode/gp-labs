@@ -163,7 +163,7 @@ const en: Messages<typeof de> = {
       removeTerm: 'Remove term {n}',
       addFactor: 'Add factor',
       removeFactor: 'Remove factor {id}',
-      factorAddTo: 'Add factor to term {n}',
+      factorAddTo: 'Add factor, term {n}',
       limitTerms: 'At most {n} terms.',
       limitFactors: 'At most {n} factors per term.',
       kind: 'Base kernel',
@@ -206,6 +206,8 @@ const en: Messages<typeof de> = {
       },
     },
     formula: 'Kernel',
+    formulaError: 'No formula can be shown for this combination; see the notes in the views below.',
+    presetWithCode: '{label} · Code {code}',
     samples: {
       title: 'Prior samples',
       label: '5 prior samples on 200 grid points',

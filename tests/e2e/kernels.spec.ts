@@ -65,7 +65,7 @@ test('builder: add and remove factors and terms, limits disable the buttons', as
   const errors = trackErrors(page)
   await page.goto('/#/kernels?preset=expquad&lang=de')
   await expect(page.locator(builder)).toHaveAttribute('data-verify-count', '1')
-  const addFactor = page.getByRole('button', { name: 'Faktor zu Term 1 hinzufügen' })
+  const addFactor = page.getByRole('button', { name: 'Faktor hinzufügen, Term 1' })
   for (let i = 0; i < 3; i++) await addFactor.click()
   await expect(page.locator(builder)).toHaveAttribute('data-verify-count', '4')
   await expect(addFactor).toBeDisabled()
@@ -148,4 +148,26 @@ test('every gallery preset renders without console errors', async ({ page }) => 
     await expect(page.locator(`${validity} rect[data-eigen="negative"]`), name).toHaveCount(0)
   }
   expect(errors).toEqual([])
+})
+
+test('u stays fixed: moving p away and back restores the same curves; only "Neu ziehen" redraws', async ({ page }) => {
+  const errors = trackErrors(page)
+  await page.goto('/#/kernels?preset=power-exp&lang=de')
+  await expect(page.locator(samples)).toHaveAttribute('data-verify-state', 'ready')
+  const first = page.locator(`${samples} path[data-layer="line"]`).first()
+  const d0 = await first.getAttribute('d')
+  const p = page.getByRole('slider', { name: 'Exponent p' })
+  await p.fill('1.5')
+  await expect(first).not.toHaveAttribute('d', d0!)
+  await p.fill('2')
+  await expect(first).toHaveAttribute('d', d0!)
+  await page.getByRole('button', { name: 'Neu ziehen' }).click()
+  await expect(page.locator(samples).getByText('Seed 2')).toBeVisible()
+  await expect(first).not.toHaveAttribute('d', d0!)
+  expect(errors).toEqual([])
+})
+
+test('ard-2d starts with seed 2', async ({ page }) => {
+  await page.goto('/#/kernels?preset=ard-2d&lang=de')
+  await expect(page.locator(samples).getByText('Seed 2')).toBeVisible()
 })

@@ -6,7 +6,7 @@ import type { Mat } from '../core/linalg'
 const props = withDefaults(defineProps<{ matrix: Mat; diverging?: boolean; label?: string }>(), {
   diverging: false,
 })
-const { t } = useI18n()
+const { lang, t } = useI18n()
 const ariaLabel = computed(() => props.label ?? t('plot.heatmap'))
 const empty = computed(() => props.matrix.rows === 0 || props.matrix.cols === 0)
 /** Finite value range, shown as text legend. */
@@ -20,7 +20,15 @@ const range = computed(() => {
   }
   return Number.isFinite(lo) ? { min: lo, max: hi } : null
 })
-const fmt = (v: number) => String(Number(v.toPrecision(3)))
+/** Legend number in the current language; scientific notation for very small or large magnitudes. */
+const fmt = (v: number) => {
+  const a = Math.abs(v)
+  const sci = a !== 0 && (a < 1e-3 || a >= 1e5)
+  return new Intl.NumberFormat(
+    lang.value,
+    sci ? { notation: 'scientific', maximumFractionDigits: 2 } : { maximumSignificantDigits: 3, useGrouping: false },
+  ).format(v)
+}
 const legend = computed(() =>
   range.value ? t('plot.range', { min: fmt(range.value.min), max: fmt(range.value.max) }) : '',
 )

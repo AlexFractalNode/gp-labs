@@ -285,10 +285,7 @@ const id = (ti: number, fi: number) => `${ti + 1}.${fi + 1}`
                   @update:model-value="setWarpParam(ti, fi, key, $event)"
                 />
               </div>
-              <!-- Keyed by inputDim: spec and inputDim must reach ParamSliders together (its sync watchers would
-                   otherwise evaluate an ARD spec with the old input dimension). -->
               <ParamSliders
-                :key="inputDim"
                 class="chip-sliders"
                 :spec="factorSpecs[ti][fi]"
                 :input-dim="inputDim"
@@ -304,7 +301,8 @@ const id = (ti: number, fi: number) => `${ti + 1}.${fi + 1}`
             :title="term.length >= MAX_FACTORS ? t('kernels.builder.limitFactors', { n: MAX_FACTORS }) : undefined"
             @click="addFactor(ti)"
           >
-            × {{ t('kernels.builder.addFactor') }}
+            <span aria-hidden="true">+</span> {{ t('kernels.builder.addFactor') }}
+            <span class="op-hint" aria-hidden="true">(×)</span>
           </button>
         </li>
       </template>
@@ -316,7 +314,7 @@ const id = (ti: number, fi: number) => `${ti + 1}.${fi + 1}`
       :title="spec.terms.length >= MAX_TERMS ? t('kernels.builder.limitTerms', { n: MAX_TERMS }) : undefined"
       @click="addTerm"
     >
-      + {{ t('kernels.builder.addTerm') }}
+      <span aria-hidden="true">+</span> {{ t('kernels.builder.addTerm') }}
     </button>
     <p v-if="spec.terms.length >= MAX_TERMS" class="limit">{{ t('kernels.builder.limitTerms', { n: MAX_TERMS }) }}</p>
   </section>
@@ -475,6 +473,10 @@ select:focus-visible,
 }
 .add-factor {
   margin-top: 0.45rem;
+}
+.op-hint {
+  color: var(--text-muted);
+  margin-left: 0.2rem;
 }
 .limit {
   margin: 0.35rem 0 0;

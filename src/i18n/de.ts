@@ -159,7 +159,7 @@ const de = {
       removeTerm: 'Term {n} entfernen',
       addFactor: 'Faktor hinzufügen',
       removeFactor: 'Faktor {id} entfernen',
-      factorAddTo: 'Faktor zu Term {n} hinzufügen',
+      factorAddTo: 'Faktor hinzufügen, Term {n}',
       limitTerms: 'Höchstens {n} Terme.',
       limitFactors: 'Höchstens {n} Faktoren je Term.',
       kind: 'Basis-Kernel',
@@ -202,6 +202,8 @@ const de = {
       },
     },
     formula: 'Kernel',
+    formulaError: 'Für diese Kombination lässt sich keine Formel anzeigen; Hinweise stehen in den Ansichten darunter.',
+    presetWithCode: '{label} · Code {code}',
     samples: {
       title: 'Prior-Samples',
       label: '5 Prior-Samples auf 200 Rasterpunkten',

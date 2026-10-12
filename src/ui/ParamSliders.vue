@@ -10,7 +10,9 @@ import {
   locationParams,
   withLogParams,
   type KernelSpec,
+  type ParamInfo,
 } from '../core/kernels'
+import { GpError } from '../core/errors'
 import LogSlider from './LogSlider.vue'
 import LinearSlider from './LinearSlider.vue'
 
@@ -85,7 +87,28 @@ function paramLabel(key: string): string {
   return k ? t(k, { index: '' }) : key
 }
 
-const info = computed(() => freeParams(props.spec, props.inputDim))
+const EMPTY_INFO: ParamInfo = {
+  names: [],
+  logValues: new Float64Array(0),
+  logLower: new Float64Array(0),
+  logUpper: new Float64Array(0),
+}
+let lastInfo: ParamInfo = EMPTY_INFO
+/**
+ * Free parameters of the spec. Vue patches the props one at a time and the sync watchers below see the
+ * intermediate state (e.g. an ARD spec with the old inputDim). Such a mismatch raises a GpError: keep the previous
+ * result until spec and inputDim agree again (both are read before freeParams can throw, so they stay tracked).
+ */
+const info = computed<ParamInfo>(() => {
+  const spec = props.spec
+  const inputDim = props.inputDim
+  try {
+    lastInfo = freeParams(spec, inputDim)
+  } catch (e) {
+    if (!(e instanceof GpError)) throw e
+  }
+  return lastInfo
+})
 
 // Structure signature: anchors are dropped when the kernel layout changes, and refreshed (sync, before
 // the groups are recomputed) when a value leaves its window.
@@ -157,7 +180,13 @@ function setLog(index: number, value: number) {
   if (!Number.isFinite(value) || value <= 0) return
   const lv = Float64Array.from(info.value.logValues)
   lv[index] = Math.log(Math.min(Math.max(value, PARAM_BOUNDS[0]), PARAM_BOUNDS[1]))
-  const next = withLogParams(props.spec, props.inputDim, lv)
+  let next: KernelSpec
+  try {
+    next = withLogParams(props.spec, props.inputDim, lv)
+  } catch (e) {
+    if (!(e instanceof GpError)) throw e
+    return
+  }
   // exp(log(x)) can overshoot a bound by one ulp: clamp every free parameter back into range.
   info.value.names.forEach((name) => {
     const m = /^t(\d+)\.f(\d+)\.(.+)$/.exec(name)!

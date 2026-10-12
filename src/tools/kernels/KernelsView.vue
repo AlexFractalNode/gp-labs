@@ -263,7 +263,9 @@ function stopDrag() {
 
 // ------------------------------------------------------------------ loading / URL
 
+/** Symmetric y range of the 1D sample plot: ±3·max sd on the grid. Not used in 2D mode (no 1D plot there). */
 function fitAxes() {
+  if (is2D.value) return
   try {
     const d = kernelDiag(spec.value, X1.value)
     let m = 0
@@ -271,7 +273,9 @@ function fitAxes() {
     const a = m > 0 ? 3 * Math.sqrt(m) : 1
     yDomain.value = [-a, a]
   } catch (e) {
-    if (!(e instanceof GpError)) console.error(e)
+    // A kernel that cannot be evaluated on the grid (e.g. log warp at x ≤ 0) keeps the old axes; the samples panel
+    // reports the same GpError as its error state.
+    if (!(e instanceof GpError)) throw e
   }
 }
 
@@ -281,7 +285,7 @@ function load() {
   const { preset: p } = loadKernelPreset(presetParam.value)
   preset.value = p
   spec.value = p.spec
-  seed.value = 1
+  seed.value = p.seed ?? 1
   x0.value = (p.domain[0] + p.domain[1]) / 2
   const d2 = p.domain2 ?? p.domain
   x0b.value = (d2[0] + d2[1]) / 2
@@ -352,7 +356,7 @@ const formula = computed(() => {
     return kernelTex(spec.value, { inputDim: inputDim.value })
   } catch (e) {
     if (!(e instanceof GpError)) throw e
-    return ''
+    return null
   }
 })
 
@@ -364,7 +368,7 @@ const presetsByGroup = GROUPS.map((g) => ({
 const presetLabel = (name: string) => {
   const code = KERNEL_PRESETS[name].ref.code
   const label = t(`kernels.preset.${name}` as MessageKey)
-  return code ? `${label} · Code ${code}` : label
+  return code ? t('kernels.presetWithCode', { label, code }) : label
 }
 
 const num = (digits: number) => new Intl.NumberFormat(lang.value, { maximumFractionDigits: digits })
@@ -415,6 +419,7 @@ const x0bStep = computed(() => (domain2.value[1] - domain2.value[0]) / 200)
       <div class="main-col">
         <section class="panel formula-panel" :aria-label="t('kernels.formula')">
           <Formula v-if="formula" :tex="formula" display />
+          <p v-else class="muted formula-error" role="status">{{ t('kernels.formulaError') }}</p>
         </section>
 
         <section
@@ -729,6 +734,9 @@ h3.no-caps {
   font-size: 0.95rem;
   min-height: 2.6rem;
   padding: 0.4rem 1rem;
+}
+.formula-error {
+  margin: 0.5rem 0;
 }
 .tools {
   display: flex;
