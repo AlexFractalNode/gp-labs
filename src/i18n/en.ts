@@ -27,6 +27,11 @@ const en: Messages<typeof de> = {
     badge: 'Textbook ch. {chapter} · Notebook code {code}',
     badgeNoCode: 'Textbook ch. {chapter}',
   },
+  plot: {
+    heatmap: 'Heatmap',
+    point: 'Data point',
+    range: 'Value range: {min} to {max}',
+  },
   status: {
     loading: 'Computing …',
     empty: 'No data available.',

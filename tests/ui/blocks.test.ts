@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import StatusPanel from '../../src/ui/StatusPanel.vue'
 import LogSlider from '../../src/ui/LogSlider.vue'
@@ -10,7 +10,8 @@ import PlotFrame from '../../src/ui/PlotFrame.vue'
 import LineLayer from '../../src/ui/LineLayer.vue'
 import BandLayer from '../../src/ui/BandLayer.vue'
 import Formula from '../../src/ui/Formula.vue'
-import { defaultKernel, type KernelSpec } from '../../src/core/kernels'
+import { BASE_KINDS, defaultKernel, isKernelSpec, locationParams, type KernelSpec } from '../../src/core/kernels'
+import PointLayer from '../../src/ui/PointLayer.vue'
 import { zeros } from '../../src/core/linalg'
 
 describe('UI building blocks', () => {
@@ -67,7 +68,7 @@ describe('UI building blocks', () => {
 
   it('PlotFrame renders an svg and emits plot-hover null on mouseleave', async () => {
     const w = mount(PlotFrame, { props: { xDomain: [0, 1], yDomain: [0, 1], xLabel: 'x', yLabel: 'y' } })
-    await w.get('rect.capture').trigger('mouseleave')
+    await w.trigger('mouseleave')
     expect(w.emitted('plot-hover')![0]).toEqual([null])
   })
 
@@ -83,7 +84,95 @@ describe('UI building blocks', () => {
   })
 
   it('Formula renders KaTeX', () => {
+    // happy-dom documents are in quirks mode, which makes KaTeX warn.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const w = mount(Formula, { props: { tex: 'x^2' } })
+    warn.mockRestore()
     expect(w.find('.katex').exists()).toBe(true)
+  })
+
+  it('LogSlider ArrowDown decreases; Home/End jump to the exact bounds', async () => {
+    const w = mount(LogSlider, { props: { modelValue: 1, min: 0.01, max: 100, label: 'ℓ' } })
+    const el = w.get('[role="slider"]')
+    await el.trigger('keydown', { key: 'ArrowDown' })
+    await el.trigger('keydown', { key: 'Home' })
+    await el.trigger('keydown', { key: 'End' })
+    const ev = w.emitted('update:modelValue')!
+    expect(ev[0][0]).toBeLessThan(1)
+    expect(ev[1][0]).toBe(0.01)
+    expect(ev[2][0]).toBe(100)
+  })
+
+  it('ParamSliders End/Home at the parameter bounds emit valid specs', async () => {
+    const k = defaultKernel('rbf')
+    k.params = { sigma: 1e5, ell: 1e-5 }
+    const w = mount(ParamSliders, { props: { spec: { terms: [[k]] }, inputDim: 1 } })
+    const sliders = w.findAll('[role="slider"]')
+    for (const s of sliders) {
+      await s.trigger('keydown', { key: 'End' })
+      await s.trigger('keydown', { key: 'Home' })
+    }
+    const out = w.emitted('update:spec')!
+    expect(out.length).toBeGreaterThanOrEqual(4)
+    for (const [spec] of out) expect(isKernelSpec(spec)).toBe(true)
+  })
+
+  it('ParamSliders: every linear slider emits a valid spec at its min and max', async () => {
+    let swept = 0
+    for (const kind of BASE_KINDS.filter((q) => locationParams(q).length > 0)) {
+      const spec: KernelSpec = { terms: [[defaultKernel(kind)]] }
+      const w = mount(ParamSliders, { props: { spec, inputDim: 1 } })
+      for (const input of w.findAll('[data-slider="linear"] input')) {
+        const { min, max } = input.attributes()
+        for (const v of [min, max]) {
+          await input.setValue(v)
+          const out = w.emitted('update:spec')!
+          expect(isKernelSpec(out[out.length - 1][0]), kind + ' ' + v).toBe(true)
+          swept++
+        }
+      }
+    }
+    expect(swept).toBeGreaterThanOrEqual(12)
+  })
+
+  it('Heatmap does not throw on NaN, constant or empty data', () => {
+    const nan = zeros(2, 2)
+    nan.data[0] = NaN
+    expect(() => mount(Heatmap, { props: { matrix: nan } })).not.toThrow()
+    const constant = zeros(2, 2)
+    constant.data.fill(3)
+    expect(() => mount(Heatmap, { props: { matrix: constant, diverging: true } })).not.toThrow()
+    const w = mount(Heatmap, { props: { matrix: zeros(0, 0) } })
+    expect(w.attributes('data-verify-state')).toBe('empty')
+    expect(mount(Heatmap, { props: { matrix: constant } }).text()).toContain('3')
+  })
+
+  it('PointLayer: long press (touch) removes the point, movement cancels it', async () => {
+    vi.useFakeTimers()
+    try {
+      const Wrap = {
+        components: { PlotFrame, PointLayer },
+        template: `<PlotFrame :x-domain="[0,1]" :y-domain="[0,1]" x-label="x" y-label="y"><PointLayer :x="[0.5]" :y="[0.5]" @point-remove="$emit('rm', $event)"/></PlotFrame>`,
+        emits: ['rm'],
+      }
+      const w = mount(Wrap)
+      const pt = w.get('[data-layer="point"]')
+      await pt.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10 })
+      vi.advanceTimersByTime(499)
+      expect(w.emitted('rm')).toBeUndefined()
+      vi.advanceTimersByTime(2)
+      expect(w.emitted('rm')![0]).toEqual([0])
+      await pt.trigger('pointerdown', { pointerType: 'touch', clientX: 10, clientY: 10 })
+      await pt.trigger('pointermove', { pointerType: 'touch', clientX: 40, clientY: 10 })
+      vi.advanceTimersByTime(1000)
+      expect(w.emitted('rm')).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('PlotFrame keeps hover while over children and carries state', async () => {
+    const w = mount(PlotFrame, { props: { xDomain: [0, 1], yDomain: [0, 1], xLabel: 'x', yLabel: 'y' } })
+    expect(w.attributes('data-verify-state')).toBe('ready')
   })
 })

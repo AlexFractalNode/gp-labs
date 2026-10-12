@@ -1,7 +1,16 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n, type MessageKey } from '../i18n'
-import { freeParams, isKernelSpec, locationParams, withLogParams, type KernelSpec } from '../core/kernels'
+import {
+  DEGREE_RANGE,
+  PARAM_BOUNDS,
+  POWEXP_P_RANGE,
+  freeParams,
+  isKernelSpec,
+  locationParams,
+  withLogParams,
+  type KernelSpec,
+} from '../core/kernels'
 import LogSlider from './LogSlider.vue'
 import LinearSlider from './LinearSlider.vue'
 
@@ -39,26 +48,66 @@ interface Group {
   entries: (LogEntry | LinEntry)[]
 }
 
-// [min, max, step] of location/shape parameters; widened to include the current value.
+// [min, max, step] of location/shape parameters; parameters with a validity domain (degree, p) are never widened.
+const BOUNDED = new Set(['degree', 'p'])
 const LINEAR_RANGES: Record<string, [number, number, number]> = {
   'linear.c': [-5, 5, 0.1],
   'polynomial.c': [0.1, 10, 0.1],
   offset: [0, 10, 0.1],
-  degree: [1, 10, 1],
-  p: [0.1, 2, 0.05],
+  degree: [DEGREE_RANGE[0], DEGREE_RANGE[1], 1],
+  p: [POWEXP_P_RANGE[0], POWEXP_P_RANGE[1], 0.05],
   x0: [-5, 5, 0.1],
 }
 
 const SUBSCRIPT = '₀₁₂₃₄₅₆₇₈₉'
 const subscript = (n: number) => String(n).replace(/\d/g, (d) => SUBSCRIPT[Number(d)])
 
+const LABELS: Record<string, MessageKey> = {
+  sigma: 'param.sigma',
+  ell: 'param.ell',
+  alpha: 'param.alpha',
+  period: 'param.period',
+  sigma0: 'param.sigma0',
+  c: 'param.c',
+  offset: 'param.offset',
+  degree: 'param.degree',
+  p: 'param.p',
+  l1: 'param.l1',
+  l2: 'param.l2',
+  w: 'param.w',
+  x0: 'param.x0',
+}
+
 function paramLabel(key: string): string {
   const ard = /^ell_(\d+)$/.exec(key)
   if (ard) return t('param.ell', { index: subscript(Number(ard[1]) + 1) })
-  return t(`param.${key}` as MessageKey, { index: '' })
+  const k = LABELS[key]
+  return k ? t(k, { index: '' }) : key
 }
 
 const info = computed(() => freeParams(props.spec, props.inputDim))
+
+// Structure signature: anchors are dropped when the kernel layout changes, and refreshed (sync, before
+// the groups are recomputed) when a value leaves its window.
+const structure = computed(
+  () =>
+    JSON.stringify([props.inputDim, props.spec.terms.map((t) => t.map((f) => [f.kind, f.ard, f.activeDims]))]) +
+    info.value.names.join(','),
+)
+watch(
+  structure,
+  () => anchors.clear(),
+  { flush: 'sync' },
+)
+watch(
+  info,
+  (i) =>
+    i.names.forEach((name, k) => {
+      const a = anchors.get(name)
+      if (a === undefined || Math.abs(i.logValues[k] - a) > WINDOW) anchors.set(name, i.logValues[k])
+    }),
+  { flush: 'sync', immediate: true },
+)
 
 const groups = computed<Group[]>(() => {
   const { names, logValues, logLower, logUpper } = info.value
@@ -70,18 +119,14 @@ const groups = computed<Group[]>(() => {
         const m = /^t(\d+)\.f(\d+)\.(.+)$/.exec(name)
         if (!m || Number(m[1]) !== ti || Number(m[2]) !== fi) return
         const v = logValues[index]
-        let a = anchors.get(name)
-        if (a === undefined || Math.abs(v - a) > WINDOW) {
-          a = v
-          anchors.set(name, a)
-        }
+        const a = anchors.get(name) ?? v
         entries.push({
           kind: 'log',
           index,
           label: paramLabel(m[3]),
           value: Math.exp(v),
-          min: Math.exp(Math.max(logLower[index], a - WINDOW)),
-          max: Math.exp(Math.min(logUpper[index], a + WINDOW)),
+          min: Math.max(PARAM_BOUNDS[0], Math.exp(Math.max(logLower[index], a - WINDOW))),
+          max: Math.min(PARAM_BOUNDS[1], Math.exp(Math.min(logUpper[index], a + WINDOW))),
         })
       })
       for (const param of locationParams(f.kind)) {
@@ -95,8 +140,8 @@ const groups = computed<Group[]>(() => {
           param,
           label: paramLabel(param),
           value,
-          min: Math.min(lo, value),
-          max: Math.max(hi, value),
+          min: BOUNDED.has(param) ? lo : Math.min(lo, value),
+          max: BOUNDED.has(param) ? hi : Math.max(hi, value),
           step,
         })
       }
@@ -109,10 +154,17 @@ const groups = computed<Group[]>(() => {
 const count = computed(() => groups.value.reduce((s, g) => s + g.entries.length, 0))
 
 function setLog(index: number, value: number) {
-  if (!(value > 0) || !Number.isFinite(value)) return
+  if (!Number.isFinite(value) || value <= 0) return
   const lv = Float64Array.from(info.value.logValues)
-  lv[index] = Math.log(value)
-  emit('update:spec', withLogParams(props.spec, props.inputDim, lv))
+  lv[index] = Math.log(Math.min(Math.max(value, PARAM_BOUNDS[0]), PARAM_BOUNDS[1]))
+  const next = withLogParams(props.spec, props.inputDim, lv)
+  // exp(log(x)) can overshoot a bound by one ulp: clamp every free parameter back into range.
+  info.value.names.forEach((name) => {
+    const m = /^t(\d+)\.f(\d+)\.(.+)$/.exec(name)!
+    const params = next.terms[Number(m[1])][Number(m[2])].params
+    params[m[3]] = Math.min(Math.max(params[m[3]], PARAM_BOUNDS[0]), PARAM_BOUNDS[1])
+  })
+  if (isKernelSpec(next)) emit('update:spec', next)
 }
 
 function setLinear(e: LinEntry, value: number) {

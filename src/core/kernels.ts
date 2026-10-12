@@ -58,6 +58,10 @@ export const MAX_FACTORS = 4
 export const MAX_ARD_DIM = 10
 /** Natural-unit bounds of every free (log-space) parameter (sklearn defaults). */
 export const PARAM_BOUNDS: readonly [number, number] = [1e-5, 1e5]
+/** Valid integer range of the polynomial degree. */
+export const DEGREE_RANGE: readonly [number, number] = [1, 5]
+/** Valid range of the power-exponential exponent p. */
+export const POWEXP_P_RANGE: readonly [number, number] = [0.5, 3]
 /** Step of the central finite differences in log space. */
 const FD_STEP = 1e-6
 /** Validity threshold: invalid iff min λ < −VALIDITY_TOL · max|λ|. */
@@ -226,8 +230,8 @@ function factorProblem(f: unknown): string | null {
     if (kind === 'linear' && k === 'sigma0' && p[k] === 0 && fixed.has('sigma0')) continue
     if (!(p[k] >= lo && p[k] <= hi)) return 'paramRange'
   }
-  if (kind === 'polynomial' && !(Number.isInteger(p.degree) && p.degree >= 1 && p.degree <= 5)) return 'paramRange'
-  if (kind === 'powexp' && !(p.p >= 0.5 && p.p <= 3)) return 'paramRange'
+  if (kind === 'polynomial' && !(Number.isInteger(p.degree) && p.degree >= DEGREE_RANGE[0] && p.degree <= DEGREE_RANGE[1])) return 'paramRange'
+  if (kind === 'powexp' && !(p.p >= POWEXP_P_RANGE[0] && p.p <= POWEXP_P_RANGE[1])) return 'paramRange'
   if (f.activeDims !== undefined) {
     const ad = f.activeDims
     if (

@@ -1,11 +1,29 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useI18n } from '../i18n'
 import type { Mat } from '../core/linalg'
 
 const props = withDefaults(defineProps<{ matrix: Mat; diverging?: boolean; label?: string }>(), {
   diverging: false,
-  label: 'Heatmap',
 })
+const { t } = useI18n()
+const ariaLabel = computed(() => props.label ?? t('plot.heatmap'))
+const empty = computed(() => props.matrix.rows === 0 || props.matrix.cols === 0)
+/** Finite value range, shown as text legend. */
+const range = computed(() => {
+  let lo = Infinity
+  let hi = -Infinity
+  for (const v of props.matrix.data) {
+    if (!Number.isFinite(v)) continue
+    if (v < lo) lo = v
+    if (v > hi) hi = v
+  }
+  return Number.isFinite(lo) ? { min: lo, max: hi } : null
+})
+const fmt = (v: number) => String(Number(v.toPrecision(3)))
+const legend = computed(() =>
+  range.value ? t('plot.range', { min: fmt(range.value.min), max: fmt(range.value.max) }) : '',
+)
 const canvas = ref<HTMLCanvasElement | null>(null)
 
 type RGB = [number, number, number]
@@ -33,7 +51,7 @@ function draw() {
   const el = canvas.value
   if (!el) return
   const { rows, cols, data } = props.matrix
-  if (rows === 0 || cols === 0) return
+  if (empty.value) return
   const ctx = el.getContext('2d')
   if (!ctx) return // e.g. happy-dom: nothing to draw into
   el.width = cols
@@ -67,18 +85,21 @@ watch(() => [props.matrix, props.diverging], draw)
 </script>
 
 <template>
-  <canvas
-    ref="canvas"
-    class="heatmap"
-    role="img"
-    :aria-label="label"
-    data-verify-unit="heatmap"
-    data-verify-state="ready"
-    :data-verify-count="matrix.rows * matrix.cols"
-  />
+  <figure class="heatmap-fig" data-verify-unit="heatmap" :data-verify-state="empty ? 'empty' : 'ready'" :data-verify-count="matrix.rows * matrix.cols">
+    <canvas v-show="!empty" ref="canvas" class="heatmap" role="img" :aria-label="ariaLabel" />
+    <figcaption v-if="legend">{{ legend }}</figcaption>
+  </figure>
 </template>
 
 <style scoped>
+.heatmap-fig {
+  margin: 0;
+}
+figcaption {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
 .heatmap {
   width: 100%;
   aspect-ratio: 1;

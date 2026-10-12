@@ -23,6 +23,11 @@ const de = {
     badge: 'Lehrbuch Kap. {chapter} · Notebook Code {code}',
     badgeNoCode: 'Lehrbuch Kap. {chapter}',
   },
+  plot: {
+    heatmap: 'Heatmap',
+    point: 'Datenpunkt',
+    range: 'Wertebereich: {min} bis {max}',
+  },
   status: {
     loading: 'Wird berechnet …',
     empty: 'Keine Daten vorhanden.',

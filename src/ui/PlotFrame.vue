@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, provide, ref } from 'vue'
+import { computed, provide, ref, useId } from 'vue'
 import { scaleLinear } from 'd3-scale'
 import { PLOT_SCALES, type PlotScales } from './plotScales'
 
@@ -44,7 +44,7 @@ function toData(clientX: number, clientY: number): { x: number; y: number } | nu
 const scales = computed<PlotScales>(() => ({ x: xScale.value, y: yScale.value, toData }))
 provide(PLOT_SCALES, scales)
 
-const clipId = `plot-clip-${Math.random().toString(36).slice(2, 9)}`
+const clipId = `plot-clip-${useId()}`
 
 function onClick(e: MouseEvent) {
   const p = toData(e.clientX, e.clientY)
@@ -55,9 +55,11 @@ function onContext(e: MouseEvent) {
   const p = toData(e.clientX, e.clientY)
   if (p) emit('plot-contextmenu', p)
 }
+// Handled on the whole svg, so hover stays active while the pointer is over a point.
 function onMove(e: MouseEvent) {
   const p = toData(e.clientX, e.clientY)
-  emit('plot-hover', p ? { x: p.x } : null)
+  const [x0, x1] = props.xDomain
+  emit('plot-hover', p && p.x >= Math.min(x0, x1) && p.x <= Math.max(x0, x1) ? { x: p.x } : null)
 }
 </script>
 
@@ -69,6 +71,9 @@ function onMove(e: MouseEvent) {
     role="group"
     :aria-label="`${yLabel} / ${xLabel}`"
     data-verify-unit="plot-frame"
+    data-verify-state="ready"
+    @mousemove="onMove"
+    @mouseleave="emit('plot-hover', null)"
   >
     <defs>
       <clipPath :id="clipId"><rect :width="innerW" :height="innerH" /></clipPath>
@@ -99,8 +104,6 @@ function onMove(e: MouseEvent) {
         :height="innerH"
         @click="onClick"
         @contextmenu="onContext"
-        @mousemove="onMove"
-        @mouseleave="emit('plot-hover', null)"
       />
       <g :clip-path="`url(#${clipId})`"><slot /></g>
     </g>

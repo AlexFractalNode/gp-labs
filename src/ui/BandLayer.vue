@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, type ComputedRef } from 'vue'
+import { computed, inject, useId, type ComputedRef } from 'vue'
 import { area } from 'd3-shape'
 import { PLOT_SCALES, type PlotScales, type Variant } from './plotScales'
 
@@ -10,7 +10,7 @@ const props = defineProps<{
   variant: Variant
 }>()
 const scales = inject<ComputedRef<PlotScales>>(PLOT_SCALES)!
-const hatchId = `hatch-${Math.random().toString(36).slice(2, 9)}`
+const hatchId = `hatch-${useId()}`
 // f: solid fill; y: hatched, so the two bands differ without relying on colour.
 const hatched = computed(() => props.variant === 'y')
 
@@ -48,6 +48,9 @@ const d = computed(() => {
 .solid {
   fill: var(--v);
   fill-opacity: 0.22;
+  stroke: var(--v);
+  stroke-opacity: 0.6;
+  stroke-width: 1;
 }
 .hatched {
   stroke: var(--v);

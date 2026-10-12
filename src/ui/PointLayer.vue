@@ -1,30 +1,58 @@
 <script setup lang="ts">
-import { inject, ref, type ComputedRef } from 'vue'
+import { inject, onBeforeUnmount, ref, type ComputedRef } from 'vue'
+import { useI18n } from '../i18n'
 import { PLOT_SCALES, type PlotScales } from './plotScales'
 
 const props = withDefaults(
   defineProps<{ x: ArrayLike<number>; y: ArrayLike<number>; editable?: boolean; label?: string }>(),
-  { editable: true, label: 'Point' },
+  { editable: true },
 )
 const emit = defineEmits<{
   'point-drag': [index: number, p: { x: number; y: number }]
   'point-remove': [index: number]
 }>()
 const scales = inject<ComputedRef<PlotScales>>(PLOT_SCALES)!
+const { t } = useI18n()
 const dragging = ref<number | null>(null)
+
+const LONG_PRESS_MS = 500
+const MOVE_TOLERANCE_PX = 6
+let pressTimer: ReturnType<typeof setTimeout> | null = null
+let pressStart = { x: 0, y: 0 }
+
+function cancelPress() {
+  if (pressTimer !== null) clearTimeout(pressTimer)
+  pressTimer = null
+}
+onBeforeUnmount(cancelPress)
 
 function onDown(i: number, e: PointerEvent) {
   if (!props.editable) return
   dragging.value = i
   const target = e.target as Element
   target.setPointerCapture?.(e.pointerId)
+  // Touch and pen have no right-click: a long press removes the point.
+  if (e.pointerType !== 'mouse') {
+    cancelPress()
+    pressStart = { x: e.clientX, y: e.clientY }
+    pressTimer = setTimeout(() => {
+      pressTimer = null
+      dragging.value = null
+      emit('point-remove', i)
+    }, LONG_PRESS_MS)
+  }
 }
 function onMove(i: number, e: PointerEvent) {
   if (dragging.value !== i) return
+  if (pressTimer !== null) {
+    if (Math.hypot(e.clientX - pressStart.x, e.clientY - pressStart.y) <= MOVE_TOLERANCE_PX) return
+    cancelPress()
+  }
   const p = scales.value.toData(e.clientX, e.clientY)
   if (p) emit('point-drag', i, p)
 }
 function onUp() {
+  cancelPress()
   dragging.value = null
 }
 function onKey(i: number, e: KeyboardEvent) {
@@ -54,39 +82,48 @@ function onContext(i: number) {
 
 <template>
   <g data-variant="points">
-    <circle
-      v-for="(xv, i) in Array.from(x)"
-      :key="i"
-      data-layer="point"
-      :class="{ editable }"
-      :cx="scales.x(xv)"
-      :cy="scales.y(y[i])"
-      r="5"
-      :tabindex="editable ? 0 : undefined"
-      :role="editable ? 'button' : undefined"
-      :aria-label="`${label} ${i + 1}`"
-      @pointerdown.stop="onDown(i, $event)"
-      @pointermove="onMove(i, $event)"
-      @pointerup="onUp"
-      @pointercancel="onUp"
-      @click.stop
-      @contextmenu.prevent.stop="onContext(i)"
-      @keydown="onKey(i, $event)"
-    />
+    <g v-for="(xv, i) in Array.from(x)" :key="i">
+      <!-- Transparent, larger hit target (touch); the visible dot follows. -->
+      <circle
+        data-layer="point"
+        class="hit"
+        :class="{ editable }"
+        :cx="scales.x(xv)"
+        :cy="scales.y(y[i])"
+        r="12"
+        :tabindex="editable ? 0 : undefined"
+        :role="editable ? 'button' : undefined"
+        :aria-label="`${label ?? t('plot.point')} ${i + 1}`"
+        @pointerdown.stop="onDown(i, $event)"
+        @pointermove="onMove(i, $event)"
+        @pointerup="onUp"
+        @pointercancel="onUp"
+        @click.stop
+        @contextmenu.prevent.stop="onContext(i)"
+        @keydown="onKey(i, $event)"
+      />
+      <circle class="dot" :cx="scales.x(xv)" :cy="scales.y(y[i])" r="5" />
+    </g>
   </g>
 </template>
 
 <style scoped>
-circle {
+.hit {
+  fill: transparent;
+  touch-action: none;
+  outline: none;
+}
+.hit.editable {
+  cursor: grab;
+}
+.dot {
   fill: var(--c-points);
   stroke: var(--bg);
   stroke-width: 1.5;
+  pointer-events: none;
 }
-circle.editable {
-  cursor: grab;
-}
-circle:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
+.hit:focus-visible + .dot {
+  stroke: var(--focus);
+  stroke-width: 3;
 }
 </style>
