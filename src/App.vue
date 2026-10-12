@@ -4,6 +4,7 @@ import { useRoute } from './router'
 import { useI18n, setLang, type MessageKey } from './i18n'
 import { dismissNotice, notify, useNotices } from './notify'
 import { buildHash, urlProblems, type Route } from './urlState'
+import HomeView from './tools/home/HomeView.vue'
 import PlaygroundView from './tools/playground/PlaygroundView.vue'
 import KernelsView from './tools/kernels/KernelsView.vue'
 import DataLabView from './tools/datalab/DataLabView.vue'
@@ -30,6 +31,15 @@ watch(
   { immediate: true },
 )
 
+// Screen readers and hyphenation follow the UI language.
+watch(
+  lang,
+  (l) => {
+    document.documentElement.lang = l
+  },
+  { immediate: true },
+)
+
 function toggleLang() {
   setLang(lang.value === 'de' ? 'en' : 'de')
 }
@@ -37,8 +47,8 @@ function toggleLang() {
 
 <template>
   <div data-verify-unit="app-shell" data-verify-state="ready" :data-verify-route="route">
-    <header>
-      <h1>{{ t('app.title') }}</h1>
+    <header class="app-head">
+      <h1><a class="brand" :href="buildHash('home')">{{ t('app.title') }}</a></h1>
       <nav :aria-label="t('nav.label')">
         <a
           v-for="l in links"
@@ -50,6 +60,7 @@ function toggleLang() {
       </nav>
       <button
         type="button"
+        class="lang"
         data-verify-unit="lang-toggle"
         :aria-label="t('lang.toggle')"
         @click="toggleLang"
@@ -58,14 +69,15 @@ function toggleLang() {
       </button>
     </header>
     <section
+      class="notices"
       data-verify-unit="notice-bar"
       :data-verify-state="notices.length ? 'ready' : 'empty'"
       :data-verify-count="notices.length"
       role="status"
     >
-      <p v-for="n in notices" :key="n.id">
-        {{ t(n.key, n.vars) }}
-        <button type="button" :aria-label="t('notice.dismiss')" @click="dismissNotice(n.id)">
+      <p v-for="n in notices" :key="n.id" class="notice">
+        <span>{{ t(n.key, n.vars) }}</span>
+        <button type="button" class="dismiss" :aria-label="t('notice.dismiss')" @click="dismissNotice(n.id)">
           ×
         </button>
       </p>
@@ -76,29 +88,123 @@ function toggleLang() {
         <PlaygroundView v-if="route === 'playground'" />
         <KernelsView v-else-if="route === 'kernels'" />
         <DataLabView v-else-if="route === 'datalab'" />
-        <p v-else>{{ t('home.placeholder') }}</p>
+        <HomeView v-else />
       </KeepAlive>
     </main>
   </div>
 </template>
 
 <style scoped>
-header {
+.app-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem 1.5rem;
   padding: 0.5rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
 }
 h1 {
-  font-size: 1.25rem;
   margin: 0;
+  font-family: var(--serif);
+  font-size: 1.3rem;
+  font-weight: 600;
+}
+.brand {
+  color: var(--text);
+  text-decoration: none;
+}
+.brand:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 nav {
   display: flex;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.25rem;
   flex: 1;
+  min-width: 0;
 }
+nav a {
+  padding: 0.45rem 0.7rem 0.35rem;
+  border-bottom: 2px solid transparent;
+  border-radius: 4px 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+nav a:hover {
+  color: var(--text);
+  border-bottom-color: var(--border);
+}
+/* The active tool is marked by weight and an underline bar, not only by colour. */
 nav a[aria-current='page'] {
-  font-weight: 700;
+  color: var(--text);
+  font-weight: 650;
+  border-bottom-color: var(--accent);
+}
+.lang {
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.lang:hover {
+  border-color: var(--accent);
+}
+.notices:not(:empty) {
+  padding: 0.5rem 1rem 0;
+}
+.notice {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  max-width: 1320px;
+  margin: 0 auto 0.4rem;
+  padding: 0.45rem 0.6rem 0.45rem 0.8rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--focus);
+  border-radius: 4px;
+  background: var(--surface);
+  font-size: 0.9rem;
+}
+.dismiss {
+  flex: none;
+  font: inherit;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.1rem 0.4rem;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.dismiss:hover {
+  color: var(--text);
+}
+
+/* Narrow screens: title and language switch on the first row, the navigation below. */
+@media (max-width: 640px) {
+  h1 {
+    flex: 1;
+  }
+  nav {
+    order: 3;
+    flex-basis: 100%;
+    gap: 0;
+  }
+  nav a {
+    padding-inline: 0.4rem;
+    font-size: 0.9rem;
+  }
 }
 </style>

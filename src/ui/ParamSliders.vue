@@ -168,7 +168,9 @@ const groups = computed<Group[]>(() => {
           step,
         })
       }
-      if (entries.length) out.push({ key: `${ti}.${fi}`, title: `${ti + 1}.${fi + 1} · ${f.kind}`, entries })
+      if (!entries.length) return
+      const kind = t(`kernels.builder.kindName.${f.kind}` as MessageKey)
+      out.push({ key: `${ti}.${fi}`, title: t('param.group', { term: ti + 1, factor: fi + 1, kind }), entries })
     }),
   )
   return out

@@ -456,7 +456,67 @@ const de = {
     largeN: 'Mehr als 2000 Trainingszeilen: Der Aufwand wächst mit n³. Eine Teilstichprobe (Schritt 3) beschleunigt den Lauf erheblich.',
   },
   home: {
-    placeholder: 'Wähle oben ein Werkzeug.',
+    titleLead: 'GP Labs – interaktive Begleitung zu',
+    work: 'Gaussian Processes for Machine Learning',
+    lead: 'Drei Werkzeuge zum Ausprobieren neben Notebook 10 und dem Lehrbuch. Alles läuft im Browser, ohne Login und ohne Installation. Jede Ansicht hat eine eigene Adresse und lässt sich als Link weitergeben.',
+    toolsTitle: 'Werkzeuge',
+    goal: 'Lernziel',
+    open: '{tool} öffnen',
+    example: 'Beispiel: {name}',
+    tool: {
+      playground: {
+        summary: 'Gauß-Prozess-Regression in einer Dimension zum Anfassen: Punkte setzen, verschieben, löschen.',
+        goal: 'Sehen, wie Daten, Hyperparameter, Rauschen und Mittelwertfunktion die Vorhersage und ihre Unsicherheit formen.',
+        example: 'Kap. 9, ein einziger Messpunkt',
+      },
+      kernels: {
+        summary: 'Kernel aus Summen und Produkten zusammensetzen und die Prior-Samples dabei stetig mitverfolgen.',
+        goal: 'Verstehen, welche Annahme über Funktionen in einem Kernel steckt und warum nicht jede Funktion ein Kernel ist.',
+        example: 'Power-Exponential mit p > 2',
+      },
+      datalab: {
+        summary: 'Der ganze Arbeitsablauf an echten Daten in fünf Schritten, mit Vergleich mehrerer Läufe.',
+        goal: 'Einen GP von der Aufteilung bis zur Hyperparameter-Schätzung aufsetzen und Fehler wie Unsicherheit prüfen.',
+      },
+    },
+    roadmapTitle: 'Was kommt noch',
+    roadmapLead: 'Ideen für weitere Werkzeuge auf demselben Rechenkern. Sie sind nicht Teil dieser Version.',
+    chapters: 'Kap. {chapter}',
+    allChapters: 'alle Kapitel',
+    roadmap: {
+      r1: {
+        name: 'Gauß- und Cholesky-Lab',
+        desc: 'Zweidimensionale Normalverteilung mit Korrelationsregler, die Konstruktion x = m + L u Schritt für Schritt und Bedingen als Schnitt.',
+      },
+      r2: {
+        name: 'Algorithmus-Stepper',
+        desc: 'Die sechs Rechenschritte mit sichtbaren Matrixblöcken, vom Ein-Punkt-Fall bis zu n Punkten.',
+      },
+      r3: {
+        name: 'Likelihood-Landschaft',
+        desc: 'Heatmap der log-marginalen Likelihood über (ℓ, σ_f) mit lokalen Optima und Mehrfachstarts. Ein Klick zeigt den zugehörigen Fit.',
+      },
+      r4: {
+        name: 'Bayes-Opt-Lab',
+        desc: 'Bayes’sche Optimierung an Testfunktionen in 1D und 2D: UCB/LCB mit κ, Exploration gegen Exploitation Schritt für Schritt.',
+      },
+      r5: {
+        name: 'Eigene Quizze',
+        desc: 'Selbst formulierte Prüffragen zu jedem Werkzeug mit sofortiger Rückmeldung.',
+      },
+      r6: {
+        name: 'Einbettung in den DS-Hub',
+        desc: 'Einzelne HTML-Bundles und ein IFrame-Schnipsel für jede passende Stelle im Notebook.',
+      },
+      r7: {
+        name: 'Lernwebseite',
+        desc: 'Integration in die geplante Lernplattform der Lehrveranstaltung.',
+      },
+    },
+    dataTitle: 'Daten',
+    data: 'Das Daten-Lab verwendet den Datensatz „Yacht Hydrodynamics“ (Gerritsma, Onnink, Versluis) aus dem UCI Machine Learning Repository, DOI 10.24432/C5XG7R, Lizenz CC BY 4.0.',
+    noticeTitle: 'Hinweis',
+    notice: 'Lehrbuch, Notebook und Folien der Lehrveranstaltung sind nicht Teil dieser Seite. Verweise wie „Lehrbuch Kap. 9 · Notebook Code 39“ zeigen nur, wo ein Thema dort behandelt wird. Alle Texte hier sind eigenständig formuliert.',
   },
   ref: {
     badge: 'Lehrbuch Kap. {chapter} · Notebook Code {code}',
@@ -473,6 +533,7 @@ const de = {
     error: 'Fehler:',
   },
   param: {
+    group: 'Term {term} · Faktor {factor}: {kind}',
     none: 'Dieser Kernel hat keine einstellbaren Parameter.',
     sigma: 'Signalstärke σ',
     ell: 'Längenskala ℓ{index}',

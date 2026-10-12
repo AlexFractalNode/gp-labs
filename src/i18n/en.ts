@@ -460,7 +460,67 @@ const en: Messages<typeof de> = {
     largeN: 'More than 2000 training rows: the cost grows with n³. A subsample (step 3) speeds up the run considerably.',
   },
   home: {
-    placeholder: 'Pick a tool above.',
+    titleLead: 'GP Labs – an interactive companion to',
+    work: 'Gaussian Processes for Machine Learning',
+    lead: 'Three tools to try out alongside Notebook 10 and the textbook. Everything runs in the browser, with no login and no installation. Every view has its own address and can be shared as a link.',
+    toolsTitle: 'Tools',
+    goal: 'Learning goal',
+    open: 'Open {tool}',
+    example: 'Example: {name}',
+    tool: {
+      playground: {
+        summary: 'Hands-on Gaussian-process regression in one dimension: add, drag and delete points.',
+        goal: 'See how data, hyperparameters, noise and the mean function shape the prediction and its uncertainty.',
+        example: 'ch. 9, a single data point',
+      },
+      kernels: {
+        summary: 'Compose kernels from sums and products and watch the prior samples deform continuously.',
+        goal: 'Understand which assumption about functions a kernel encodes, and why not every function is a kernel.',
+        example: 'power exponential with p > 2',
+      },
+      datalab: {
+        summary: 'The complete workflow on real data in five steps, with a comparison of several runs.',
+        goal: 'Set up a GP from the data split to hyperparameter estimation, then check both errors and uncertainty.',
+      },
+    },
+    roadmapTitle: 'What comes next',
+    roadmapLead: 'Ideas for further tools on the same numerical core. They are not part of this version.',
+    chapters: 'ch. {chapter}',
+    allChapters: 'all chapters',
+    roadmap: {
+      r1: {
+        name: 'Gaussian and Cholesky lab',
+        desc: 'A two-dimensional normal distribution with a correlation slider, the construction x = m + L u step by step, and conditioning as a slice.',
+      },
+      r2: {
+        name: 'Algorithm stepper',
+        desc: 'The six computation steps with visible matrix blocks, from the one-point case to n points.',
+      },
+      r3: {
+        name: 'Likelihood landscape',
+        desc: 'A heatmap of the log marginal likelihood over (ℓ, σ_f) with local optima and restarts. A click shows the corresponding fit.',
+      },
+      r4: {
+        name: 'Bayes-opt lab',
+        desc: 'Bayesian optimisation on test functions in 1D and 2D: UCB/LCB with κ, exploration versus exploitation step by step.',
+      },
+      r5: {
+        name: 'Own quizzes',
+        desc: 'Self-written check questions for each tool with instant feedback.',
+      },
+      r6: {
+        name: 'Embedding in the DS hub',
+        desc: 'Single-file HTML bundles and an IFrame snippet for each matching place in the notebook.',
+      },
+      r7: {
+        name: 'Learning website',
+        desc: 'Integration into the planned learning platform of the course.',
+      },
+    },
+    dataTitle: 'Data',
+    data: 'The data lab uses the “Yacht Hydrodynamics” data set (Gerritsma, Onnink, Versluis) from the UCI Machine Learning Repository, DOI 10.24432/C5XG7R, licensed under CC BY 4.0.',
+    noticeTitle: 'Note',
+    notice: 'The textbook, notebook and slides of the course are not part of this site. References such as “Textbook ch. 9 · Notebook code 39” only point to where a topic is covered there. All texts here are written independently.',
   },
   ref: {
     badge: 'Textbook ch. {chapter} · Notebook code {code}',
@@ -477,6 +537,7 @@ const en: Messages<typeof de> = {
     error: 'Error:',
   },
   param: {
+    group: 'Term {term} · Factor {factor}: {kind}',
     none: 'This kernel has no adjustable parameters.',
     sigma: 'Signal strength σ',
     ell: 'Length scale ℓ{index}',
