@@ -24,6 +24,22 @@ export function parseHash(hash: string): {
   return { route: 'home', params, unknownRoute: true }
 }
 
+/**
+ * Whether two hashes name the same route with the same parameter set, regardless of the parameter order
+ * (`#/a?x=1&y=2` equals `#/a?y=2&x=1`).
+ */
+export function sameHash(a: string, b: string): boolean {
+  const pa = parseHash(a)
+  const pb = parseHash(b)
+  if (pa.route !== pb.route || pa.unknownRoute !== pb.unknownRoute) return false
+  const key = (p: URLSearchParams) =>
+    [...p.entries()]
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .sort()
+      .join('&')
+  return key(pa.params) === key(pb.params)
+}
+
 export function buildHash(route: Route, params?: Record<string, string>): string {
   const path = route === 'home' ? '#/' : `#/${route}`
   const qs = params ? new URLSearchParams(params).toString() : ''
@@ -58,6 +74,8 @@ export function decodeKernel(s: string): KernelSpec | null {
 }
 
 export const KERNEL_PARAM = 'kernel'
+/** Query parameter naming the active scenario of a tool (`src/tools/scenarios.ts`). */
+export const SCENARIO_PARAM = 'scenario'
 
 /** Problems in the parsed URL that warrant a notice; empty when the URL is fine. */
 export function urlProblems(state: {

@@ -7,7 +7,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useI18n, type MessageKey } from '../../i18n'
 import { notify } from '../../notify'
-import { useRoute } from '../../router'
+import { useRoute, type RouteState } from '../../router'
 import { buildHash, KERNEL_PARAM, parseHash } from '../../urlState'
 import { GpError } from '../../core/errors'
 import { modelParams, withModelLogParams, type GpModel } from '../../core/gp'
@@ -23,6 +23,10 @@ import LogSlider from '../../ui/LogSlider.vue'
 import ParamSliders from '../../ui/ParamSliders.vue'
 import Formula from '../../ui/Formula.vue'
 import RefBadge from '../../ui/RefBadge.vue'
+import ScenarioArea from '../../ui/ScenarioArea.vue'
+import type { Scenario } from '../scenarios'
+import { useScenario } from '../useScenario'
+import { expectedPlaygroundSettings, playgroundKey } from './scenarioKey'
 import CursorLayer from './CursorLayer.vue'
 import Inspector from './Inspector.vue'
 import { inspectAt, type InspectResult } from './inspect'
@@ -332,19 +336,32 @@ function load() {
   inspector.now()
 }
 
+/**
+ * Loads once per route object (Spec §3.3): the preset watcher, the scenario adoption and the mount all land here,
+ * so watcher order and double triggers do not matter, and `refreshRoute` (a new route object) always reloads. A
+ * Playground scenario is its address alone, so `load()` needs no settings on top; it already resets layers,
+ * sample choice, pin, hover and seed and cancels a running optimisation.
+ */
+let loadedFor: RouteState | null = null
+function loadOnce() {
+  if (loadedFor === route.value) return
+  loadedFor = route.value
+  load()
+}
+
 function fitAxes() {
   yDomain.value = fitYDomain(model.value, points.value, view.value, truth.value)
 }
 
 const presetKey = computed(() => `${route.value.route}|${presetName.value}|${route.value.params.get(KERNEL_PARAM)}`)
 watch(presetKey, () => {
-  if (route.value.route === 'playground') load()
+  if (route.value.route === 'playground') loadOnce()
 })
 // A changed mean moves the curves vertically: refit the axes once per change.
 watch(meanKind, fitAxes)
 
 onMounted(() => {
-  load()
+  loadOnce()
   window.addEventListener('pointerup', onPointerUp)
   window.addEventListener('pointercancel', onPointerUp)
 })
@@ -519,6 +536,33 @@ function tweenTo(target: GpModel) {
   })
 }
 
+// ------------------------------------------------------------------ scenarios
+
+/** Expected keys per scenario id: the settings are memoised, their key (500 points for the sine) is too. */
+const expectedKeys = new Map<string, string>()
+function expectedKey(s: Scenario): string {
+  let k = expectedKeys.get(s.id)
+  if (k === undefined) {
+    k = playgroundKey(expectedPlaygroundSettings(s))
+    expectedKeys.set(s.id, k)
+  }
+  return k
+}
+const scenario = useScenario('playground', {
+  adopt: loadOnce,
+  liveKey: () =>
+    playgroundKey({
+      points: points.value,
+      kernel: kernel.value,
+      sigmaN: sigmaN.value,
+      mean: mean.value,
+      pinnedX: pinnedX.value,
+    }),
+  expectedKey,
+  // a running optimisation (and its tween) counts as a deviation only from its result on
+  settled: () => !opt.running && !tweening.value,
+})
+
 // ------------------------------------------------------------------ display
 
 const fmt = (digits: number) =>
@@ -622,6 +666,8 @@ const meanLabel = (k: MeanKind): MessageKey => `playground.meanKind.${k}` as Mes
       </div>
       <RefBadge chapter="1, 6, 11" code="17–42" />
     </header>
+
+    <ScenarioArea tool="playground" :scenario="scenario" />
 
     <div class="pg-grid">
       <div class="plot-col">
