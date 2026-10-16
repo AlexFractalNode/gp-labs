@@ -4,8 +4,9 @@
  * back to its step at any time; later steps open once their inputs are valid. The hyperparameters are optimised
  * in the worker (maxIter 500); the fitted model is evaluated on the main thread (`evaluateRun`). A failed or
  * cancelled run sets `datalab-run` to `error` and keeps the last successful result and the runs table.
+ * Scenarios d1–d3 (Spec §3.3) load the Yacht data, apply their settings and start one run.
  */
-import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useI18n, type MessageKey } from '../../i18n'
 import { useRoute } from '../../router'
 import { decodeKernel, KERNEL_PARAM } from '../../urlState'
@@ -15,6 +16,10 @@ import { kernelTex, MAX_ARD_DIM, type KernelSpec } from '../../core/kernels'
 import { createRng } from '../../core/rng'
 import { createOptimizeClient, type OptimizeHandle } from '../../worker/client'
 import RefBadge from '../../ui/RefBadge.vue'
+import ScenarioArea from '../../ui/ScenarioArea.vue'
+import type { Scenario } from '../scenarios'
+import { useScenario } from '../useScenario'
+import { datalabKey, expectedDatalabSettings } from './scenarioKey'
 import {
   buildModelWithNotices,
   canLogTarget,
@@ -423,14 +428,100 @@ const summaries = computed<Record<StepId, string>>(() => {
 })
 
 const currentMeta = computed(() => (current.value ? (runMeta(current.value) ?? null) : null))
+
+// ------------------------------------------------------------------ scenarios
+
+/** True from the adoption of a scenario until its Yacht data are loaded and its settings applied. */
+const adopting = ref(false)
+/** The current adoption (Yacht load plus settings); the start action waits for it. */
+let pendingAdoption: Promise<void> = Promise.resolve()
+/**
+ * Runs started by a scenario, as `data-verify-runs`: a second start cancels the first, so the runs table alone
+ * (one entry then) cannot show how often the start action ran.
+ */
+const scenarioRuns = ref(0)
+
+/**
+ * Adopts a Daten-Lab scenario (Spec §3.3): cancels a running run, goes back to step 1 and loads the Yacht data;
+ * `resetSelection` sets target, features, test fraction and seed, then the scenario's settings follow. The runs
+ * table stays, so d1–d3 can be compared. State only: the watcher may call this while the cached view is still
+ * deactivated; the step switch to "model" belongs to the start action. A later adoption (`generation`) supersedes
+ * this one, also after the asynchronous load.
+ */
+function adoptScenario(s: Scenario) {
+  const gen = scenario.generation.value
+  cancelRun()
+  active.value = 'data'
+  adopting.value = true
+  pendingAdoption = loadYacht()
+    .then(() => {
+      if (gen !== scenario.generation.value) return
+      const settings = s.datalab
+      if (settings && loadState.value === 'ready' && source.value?.kind === 'yacht') {
+        template.value = settings.template
+        logTarget.value = settings.logTarget
+        notebookMode.value = settings.notebookMode
+        restarts.value = settings.restarts
+      }
+    })
+    .catch((e: unknown) => console.error(`scenario ${s.id}: adoption failed`, e))
+    .finally(() => {
+      if (gen === scenario.generation.value) adopting.value = false
+    })
+}
+
+/** Start action: one run per adoption, once the data and settings are in place and the adoption is still current. */
+async function scenarioStartRun(s: Scenario, gen: number) {
+  await pendingAdoption
+  if (gen !== scenario.generation.value || scenario.active.value !== s) return
+  if (loadState.value !== 'ready' || !canStart.value) return
+  active.value = 'model' // progress visible
+  scenarioRuns.value++
+  startRun()
+}
+
+const scenario = useScenario('datalab', {
+  adopt: adoptScenario,
+  liveKey: () =>
+    datalabKey({
+      source: source.value?.kind ?? null,
+      target: target.value,
+      features: features.value,
+      logTarget: logTarget.value,
+      testFraction: testFraction.value,
+      seed: seed.value,
+      notebookMode: notebookMode.value,
+      subsample: subsample.value,
+      template: template.value,
+      restarts: restarts.value,
+    }),
+  expectedKey: (s) => datalabKey(expectedDatalabSettings(s)),
+  // loading data or applying settings is no deviation (otherwise "changed" flashes for a flush after the load)
+  settled: () => loadState.value !== 'loading' && !adopting.value,
+  actions: { startRun: scenarioStartRun },
+})
+// A cold start with a scenario adopts it in onMounted; until then the box must not report a deviation either.
+adopting.value = scenario.active.value !== null
+// KeepAlive: mounted once; later adoptions of the cached view come from the route watcher.
+onMounted(() => {
+  if (scenario.active.value) adoptScenario(scenario.active.value)
+})
 </script>
 
 <template>
-  <div class="dl" data-verify-unit="datalab-view" data-verify-state="ready" :data-verify-step="active">
+  <div
+    class="dl"
+    data-verify-unit="datalab-view"
+    data-verify-state="ready"
+    :data-verify-step="active"
+    :data-verify-runs="scenarioRuns"
+  >
     <header class="dl-head">
       <h2 class="title">{{ t('datalab.title') }}</h2>
       <p class="lead">{{ t('datalab.lead') }}</p>
     </header>
+
+    <ScenarioArea tool="datalab" :scenario="scenario" />
 
     <ol class="steps">
       <li

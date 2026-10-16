@@ -31,12 +31,16 @@ const scenario = (id: string): Scenario => {
 }
 
 /** A unit of the view of `tool` whose state shows that the view has rendered. */
-const READY: Partial<Record<ToolId, string>> = { playground: 'playground-plot', kernels: 'kernel-samples' }
+const READY: Record<ToolId, string> = {
+  playground: 'playground-plot',
+  kernels: 'kernel-samples',
+  datalab: 'datalab-view',
+}
 
 async function openTool(page: Page, tool: ToolId, query = 'lang=de') {
   await page.goto(`/#/${tool}?${query}`)
   await expect(page.locator(unit('scenario-bar'))).toBeVisible(T)
-  await expect(page.locator(unit(READY[tool]!))).toHaveAttribute('data-verify-state', /^(ready|loading|error)$/, T)
+  await expect(page.locator(unit(READY[tool]))).toHaveAttribute('data-verify-state', /^(ready|loading|error)$/, T)
 }
 
 async function openScenario(page: Page, s: Scenario, mode: 'click' | 'link') {
@@ -252,7 +256,7 @@ test('closing the box removes scenario from the address and focuses the card', a
   expect(errors).toEqual([])
 })
 
-for (const id of ['p1', 'k1'] as const) {
+for (const id of ['p1', 'k1', 'd1'] as const) {
   for (const l of ['de', 'en'] as const) {
     const s = scenario(id)
     test(`no horizontal overflow at 375 px: ${s.tool} ${l} with an open scenario box`, async ({ page }) => {
@@ -261,7 +265,7 @@ for (const id of ['p1', 'k1'] as const) {
       await expect(note(page)).toHaveAttribute('data-verify-state', 'ready', T)
       await expect(page.locator(unit('scenario-bar'))).toBeVisible()
       await expect(note(page)).toBeVisible()
-      await expect(page.locator(unit(READY[s.tool]!))).toHaveAttribute('data-verify-state', /^(ready|loading)$/, T)
+      await expect(page.locator(unit(READY[s.tool]))).toHaveAttribute('data-verify-state', /^(ready|loading)$/, T)
       const widths = await page.evaluate(() => ({
         doc: document.documentElement.scrollWidth,
         body: document.body.scrollWidth,
@@ -271,3 +275,165 @@ for (const id of ['p1', 'k1'] as const) {
     })
   }
 }
+
+// ------------------------------------------------------------------ Daten-Lab (one run takes about 20–60 s)
+
+const lab = (page: Page) => page.locator(unit('datalab-view'))
+const labRun = (page: Page) => page.locator(unit('datalab-run'))
+const labRuns = (page: Page) => page.locator(unit('datalab-runs'))
+const labResult = (page: Page) => page.locator(unit('datalab-result'))
+const labTemplate = (page: Page) => page.locator('select[data-field="template"]')
+const RUN = { timeout: 200_000 }
+
+/** Waits for the run to finish and checks the numbers of the scenario text (Spec §3.4). */
+async function expectRunResult(page: Page, rmse: string, negative: boolean) {
+  await expect(labRun(page)).toHaveAttribute('data-verify-state', 'ready', RUN)
+  await expect(labResult(page)).toHaveAttribute('data-verify-state', 'ready')
+  const value = Number(await labResult(page).locator('[data-metric="rmseTest"]').getAttribute('data-value'))
+  expect(value.toFixed(3)).toBe(rmse)
+  const warning = labResult(page).locator('[data-warning="negativePredictions"]')
+  if (negative) await expect(warning).toBeVisible()
+  else await expect(warning).toHaveCount(0)
+}
+
+/** base64url of a JSON kernel spec, as the Kernel-Baukasten writes it into ?kernel=. */
+function kernelParam(spec: unknown): string {
+  return Buffer.from(JSON.stringify(spec)).toString('base64url')
+}
+
+test('d1 by link: one run with the notebook result; time and the language switch start no other; the card again does', async ({
+  page,
+}) => {
+  test.setTimeout(240_000)
+  const errors = trackErrors(page)
+  // Every value data-verify-deviated ever takes, from the first render on (the box must never flash "changed").
+  await page.addInitScript(() => {
+    const seen: string[] = []
+    ;(window as unknown as { __deviated: string[] }).__deviated = seen
+    const record = (el: Element) => {
+      const v = el.getAttribute('data-verify-deviated')
+      if (v !== null) seen.push(v)
+    }
+    new MutationObserver((list) => {
+      for (const m of list) {
+        if (m.type === 'attributes') record(m.target as Element)
+        else
+          for (const n of Array.from(m.addedNodes)) {
+            if (!(n instanceof Element)) continue
+            record(n)
+            n.querySelectorAll('[data-verify-deviated]').forEach(record)
+          }
+      }
+    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-verify-deviated'] })
+  })
+  await openScenario(page, scenario('d1'), 'link')
+  await expect(lab(page)).toHaveAttribute('data-verify-runs', '1', T)
+  await expect(labRun(page)).toHaveAttribute('data-verify-state', 'loading')
+  await expect(lab(page)).toHaveAttribute('data-verify-step', 'model')
+  await expectRunResult(page, '0.392', true)
+  await expect(labRuns(page)).toHaveAttribute('data-verify-count', '1')
+  await page.waitForTimeout(3000)
+  await expect(lab(page)).toHaveAttribute('data-verify-runs', '1')
+  await lang(page).click()
+  await expect(page).toHaveURL(/lang=en/)
+  await expect(page).toHaveURL(/scenario=d1/)
+  await page.waitForTimeout(500)
+  await expect(lab(page)).toHaveAttribute('data-verify-runs', '1')
+  await expect(labRun(page)).toHaveAttribute('data-verify-state', 'ready')
+
+  // The active card again: a second run, the runs table keeps both.
+  await card(page, 'd1').click()
+  await expect(lab(page)).toHaveAttribute('data-verify-runs', '2', T)
+  await expect(labRun(page)).toHaveAttribute('data-verify-state', 'loading')
+  await expect(labRun(page)).toHaveAttribute('data-verify-state', 'ready', RUN)
+  await expect(labRuns(page)).toHaveAttribute('data-verify-count', '2')
+  const seen = await page.evaluate(() => (window as unknown as { __deviated: string[] }).__deviated)
+  expect(seen.length).toBeGreaterThan(0)
+  expect(seen).not.toContain('true')
+  expect(errors).toEqual([])
+})
+
+for (const [id, rmse, negative] of [
+  ['d2', '0.421', true],
+  ['d3', '0.369', false],
+] as const) {
+  test(`${id} by click: one run with the result of the scenario text`, async ({ page }) => {
+    test.setTimeout(240_000)
+    const errors = trackErrors(page)
+    await openScenario(page, scenario(id), 'click')
+    await expect(lab(page)).toHaveAttribute('data-verify-runs', '1', T)
+    await expectRunResult(page, rmse, negative)
+    await expect(note(page)).toHaveAttribute('data-verify-deviated', 'false')
+    expect(errors).toEqual([])
+  })
+}
+
+test('d1: another template marks the scenario as deviated; restore brings back the notebook template and a run', async ({
+  page,
+}) => {
+  test.setTimeout(240_000)
+  const errors = trackErrors(page)
+  await openScenario(page, scenario('d1'), 'link')
+  await expect(lab(page)).toHaveAttribute('data-verify-runs', '1', T)
+  await page.locator('[data-action="cancel-run"]').click()
+  await expect(labRun(page)).toHaveAttribute('data-verify-state', 'error')
+  await expect(note(page)).toHaveAttribute('data-verify-deviated', 'false')
+  await labTemplate(page).selectOption('rbf')
+  await expect(note(page)).toHaveAttribute('data-verify-deviated', 'true')
+  await note(page).locator('[data-action="restore"]').click()
+  await expect(lab(page)).toHaveAttribute('data-verify-runs', '2', T)
+  await expect(note(page)).toHaveAttribute('data-verify-deviated', 'false')
+  await expect(labTemplate(page)).toHaveValue('notebook')
+  await expect(labRun(page)).toHaveAttribute('data-verify-state', 'loading')
+  await expect(note(page).locator('.note-title')).toBeFocused()
+  expect(errors).toEqual([])
+})
+
+test('d1: back in the cached lab without scenario, runs and settings stay; ?kernel= starts no run', async ({ page }) => {
+  test.setTimeout(240_000)
+  const errors = trackErrors(page)
+  await openScenario(page, scenario('d1'), 'link')
+  await expect(labRun(page)).toHaveAttribute('data-verify-state', 'ready', RUN)
+  await expect(labRuns(page)).toHaveAttribute('data-verify-count', '1')
+  await page.locator('nav a[href="#/playground"]').click()
+  await expect(plot(page)).toHaveAttribute('data-verify-state', 'ready', T)
+  await page.locator('nav a[href="#/datalab"]').click()
+  await expect(note(page)).toHaveAttribute('data-verify-state', 'empty', T)
+  await expect(labRuns(page)).toHaveAttribute('data-verify-count', '1')
+  await expect(lab(page)).toHaveAttribute('data-verify-runs', '1')
+  await expect(labTemplate(page)).toHaveValue('notebook')
+  await expect(page.locator(unit('datalab-split'))).toHaveAttribute('data-verify-mode', 'notebook')
+  await expect(labRun(page)).toHaveAttribute('data-verify-state', 'ready')
+
+  const rbf = kernelParam({ terms: [[{ kind: 'rbf', params: { sigma: 1, ell: 0.5 } }]] })
+  await page.goto(`/#/datalab?kernel=${rbf}`)
+  await expect(labTemplate(page)).toHaveValue('baukasten')
+  await page.waitForTimeout(1000)
+  await expect(lab(page)).toHaveAttribute('data-verify-runs', '1')
+  await expect(labRun(page)).toHaveAttribute('data-verify-state', 'ready')
+  await expect(labRuns(page)).toHaveAttribute('data-verify-count', '1')
+  await expect(note(page)).toHaveAttribute('data-verify-state', 'empty')
+
+  // From another tool straight to the scenario: adopted while the cached lab is still deactivated, then one run.
+  await page.locator('nav a[href="#/playground"]').click()
+  await expect(plot(page)).toHaveAttribute('data-verify-state', 'ready', T)
+  await page.goto(`/${scenarioHref(scenario('d1'), 'de')}`)
+  await expect(lab(page)).toHaveAttribute('data-verify-runs', '2', T)
+  await expect(labRun(page)).toHaveAttribute('data-verify-state', 'loading')
+  await expect(lab(page)).toHaveAttribute('data-verify-step', 'model')
+  await expect(labTemplate(page)).toHaveValue('notebook')
+  await expect(note(page)).toHaveAttribute('data-verify-deviated', 'false')
+  expect(errors).toEqual([])
+})
+
+test('an unknown Daten-Lab scenario shows a notice, no box and loads nothing', async ({ page }) => {
+  const errors = trackErrors(page)
+  await page.goto('/#/datalab?scenario=p1&lang=de')
+  await expect(page.locator(unit('scenario-bar'))).toBeVisible(T)
+  await expect(page.locator(unit('notice-bar'))).toContainText(de.notice.unknownScenario)
+  await expect(note(page)).toHaveAttribute('data-verify-state', 'empty')
+  await expect(page).not.toHaveURL(/scenario=/)
+  await expect(page.locator(unit('datalab-preview'))).toHaveAttribute('data-verify-state', 'empty')
+  await expect(lab(page)).toHaveAttribute('data-verify-runs', '0')
+  expect(errors).toEqual([])
+})
