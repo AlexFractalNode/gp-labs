@@ -472,17 +472,15 @@ const en: Messages<typeof de> = {
     toolsTitle: 'Tools',
     goal: 'Learning goal',
     open: 'Open {tool}',
-    example: 'Example: {name}',
+    scenarios: 'Scenarios',
     tool: {
       playground: {
         summary: 'Hands-on Gaussian-process regression in one dimension: add, drag and delete points.',
         goal: 'See how data, hyperparameters, noise and the mean function shape the prediction and its uncertainty.',
-        example: 'ch. 9, a single data point',
       },
       kernels: {
         summary: 'Compose kernels from sums and products and watch the prior samples deform continuously.',
         goal: 'Understand which assumption about functions a kernel encodes, and why not every function is a kernel.',
-        example: 'power exponential with p > 2',
       },
       datalab: {
         summary: 'The complete workflow on real data in five steps, with a comparison of several runs.',

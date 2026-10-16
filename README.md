@@ -10,19 +10,44 @@ The interface is bilingual (German by default, English via the toggle or `?lang=
 The app does not reproduce the textbook. Its texts are written independently; references such as
 "Lehrbuch Kap. 9 · Notebook Code 39" only point to where a topic is covered in the course materials.
 
-## Tools and example links
+## Tools and scenarios
 
 Live site (after the first deployment): <https://alexfractalnode.github.io/gp-labs/>
 
-| Tool | Route | What it shows | Example |
+| Tool | Route | What it shows | Scenarios |
 |---|---|---|---|
-| GP Playground | `#/playground` | 1-D GP regression: click to add points, function and observation bands, samples, mean functions (incl. GLS), hyperparameter optimisation, an inspector for x* | `#/playground?preset=kap9&x=0` (one-point example of ch. 9) |
-| Kernel Builder | `#/kernels` | Compose kernels from sums and products, prior samples that morph continuously, covariance heatmap, eigenvalue-based validity check, 2-D mode | `#/kernels?preset=power-exp` (raise p above 2) |
-| Data Lab | `#/datalab` | The full workflow on real data in five steps (data, target, split, model, result), run comparison, "reproduce the notebook exactly" | `#/datalab` |
+| GP Playground | `#/playground` | 1-D GP regression: click to add points, function and observation bands, samples, mean functions (incl. GLS), hyperparameter optimisation, an inspector for x* | `p1` One data point, `p2` Far from the data, `p3` Length scale too large, too small |
+| Kernel Builder | `#/kernels` | Compose kernels from sums and products, prior samples that morph continuously, covariance heatmap, eigenvalue-based validity check, 2-D mode | `k1` What does “similar” mean?, `k2` Sum or product?, `k3` Valid or not? |
+| Data Lab | `#/datalab` | The full workflow on real data in five steps (data, target, split, model, result), run comparison, "reproduce the notebook exactly" | `d1` The notebook, exactly, `d2` A simpler kernel, `d3` Log target |
 
 More presets: `#/playground?preset=sine`, `?preset=mean-demo`, `?preset=extrapolation`, `?preset=hyper`.
 Prefix the routes with the site URL, e.g. `https://alexfractalnode.github.io/gp-labs/#/kernels?preset=power-exp`.
 Invalid URL parameters fall back to a default view and show a notice.
+
+## Scenarios and help
+
+Each tool offers three ready-made scenarios in a bar above the controls (the start page links to them as well).
+Choosing one sets the tool to a prepared state and shows a short box with what you see, what to watch and what to
+try next. The Data Lab scenarios also start their run. Every number in a scenario text is checked against the
+TypeScript core by tests (`tests/core/claims`), so the texts cannot drift from the computation. If you change a
+setting, the box says so and offers to restore the scenario. A scenario is shareable: its address carries
+`scenario=<id>`, and an unknown id falls back to the plain tool with a notice.
+
+| ID | Scenario | Example address |
+|---|---|---|
+| `p1` | One data point (ch. 9) | `#/playground?preset=kap9&x=0&scenario=p1` |
+| `p2` | Far from the data (ch. 11) | `#/playground?preset=extrapolation&x=3&scenario=p2` |
+| `p3` | Length scale too large, too small (ch. 12) | `#/playground?preset=hyper-43&scenario=p3` |
+| `k1` | What does “similar” mean? (ch. 8) | `#/kernels?preset=expquad&scenario=k1` |
+| `k2` | Sum or product? (ch. 13.4) | `#/kernels?preset=lin-plus-periodic&scenario=k2` |
+| `k3` | Valid or not? (ch. 8.5) | `#/kernels?preset=power-exp&scenario=k3` |
+| `d1` | The notebook, exactly (ch. 15) | `#/datalab?scenario=d1` |
+| `d2` | A simpler kernel (ch. 14–15) | `#/datalab?scenario=d2` |
+| `d3` | Log target (ch. 17) | `#/datalab?scenario=d3` |
+
+Every tool page also has a **Help** button in the header. It opens a side panel (full screen on narrow displays) with
+what the tool is for, how to read the view, what the controls do and where the topic appears in the course. The
+panel is not shown on the start page.
 
 ## Local development
 

@@ -468,17 +468,15 @@ const de = {
     toolsTitle: 'Werkzeuge',
     goal: 'Lernziel',
     open: '{tool} öffnen',
-    example: 'Beispiel: {name}',
+    scenarios: 'Szenarien',
     tool: {
       playground: {
         summary: 'Gauß-Prozess-Regression in einer Dimension zum Anfassen: Punkte setzen, verschieben, löschen.',
         goal: 'Sehen, wie Daten, Hyperparameter, Rauschen und Mittelwertfunktion die Vorhersage und ihre Unsicherheit formen.',
-        example: 'Kap. 9, ein einziger Messpunkt',
       },
       kernels: {
         summary: 'Kernel aus Summen und Produkten zusammensetzen und die Prior-Samples dabei stetig mitverfolgen.',
         goal: 'Verstehen, welche Annahme über Funktionen in einem Kernel steckt und warum nicht jede Funktion ein Kernel ist.',
-        example: 'Power-Exponential mit p > 2',
       },
       datalab: {
         summary: 'Der ganze Arbeitsablauf an echten Daten in fünf Schritten, mit Vergleich mehrerer Läufe.',
