@@ -53,10 +53,19 @@ function pinnedFrom(x: string | undefined): number | null {
 
 const memo = new Map<string, PlaygroundSettings>()
 
+/** Freezes an object graph in place (the memoised settings are shared between all callers). */
+function deepFreeze<T>(v: T): T {
+  if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) {
+    Object.freeze(v)
+    for (const x of Object.values(v)) deepFreeze(x)
+  }
+  return v
+}
+
 /**
  * Settings a Playground scenario describes: `loadPreset(query.preset)` + `resolveKernel(query.kernel)`, x* from
- * `query.x`. Memoised per scenario id (the sine presets would rebuild 500 points per call); the result is shared,
- * so callers must not mutate it. Throws for a scenario of another tool.
+ * `query.x`. Memoised per scenario id (the sine presets would rebuild 500 points per call); the result is shared
+ * and deeply frozen, so callers copy before editing. Throws for a scenario of another tool.
  */
 export function expectedPlaygroundSettings(s: Scenario): PlaygroundSettings {
   assertTool(s, 'playground')
@@ -64,13 +73,13 @@ export function expectedPlaygroundSettings(s: Scenario): PlaygroundSettings {
   if (hit) return hit
   const { state } = loadPreset(s.query.preset ?? null)
   const { model } = resolveKernel(s.query[KERNEL_PARAM] ?? null, state.model)
-  const settings: PlaygroundSettings = {
+  const settings: PlaygroundSettings = deepFreeze({
     points: state.points,
     kernel: model.kernel,
     sigmaN: model.sigmaN,
     mean: viewMean(model.mean),
     pinnedX: pinnedFrom(s.query.x),
-  }
+  })
   memo.set(s.id, settings)
   return settings
 }

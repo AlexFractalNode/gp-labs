@@ -582,7 +582,7 @@ const de = {
       title: 'Längenskala zu groß, zu klein (Kap. 12)',
       short: 'Wie die Längenskala die Likelihood bestimmt',
       see: 'Code 43: 500 verrauschte Sinuspunkte und ein RBF mit ℓ = 1. Die Kurve glättet die Schwingungen weg, die log ML ist −1553,4.',
-      watch: 'Code 45 mit ℓ = 0,001 kommt auf −868,3, Code 47 mit ℓ = 0,01 und σ = 5 auf −531,9: Zu kleine Längenskalen laufen jedem Messpunkt nach.',
+      watch: 'Code 45 mit ℓ = 0,001 kommt auf −868,3, Code 47 mit ℓ = 0,01 und σ = 5 auf −531,9: Zu kleine Längenskalen laufen jedem Messpunkt nach, und beide bleiben weit unter dem Maximum.',
       next: 'Das Maximum liegt nahe ℓ ≈ 0,10 (dazu σ ≈ 1,62 und σₙ ≈ 0,41) mit log ML ≈ −294,5. „Hyperparameter optimieren“ findet es, braucht bei 500 Punkten aber eine Weile.',
     },
     k1: {
@@ -622,7 +622,7 @@ const de = {
     },
     d3: {
       title: 'Log-Ziel (Kap. 17)',
-      short: 'Vorhersagen auf der Log-Skala, nie negativ',
+      short: 'Modell auf log(y), Vorhersagen nie negativ',
       see: 'Die Notebook-Vorlage auf log(y), ohne Neustarts, damit der Lauf rasch fertig ist. Ergebnis: Test-RMSE 0,369.',
       watch: 'Keine Testvorhersage ist mehr negativ, 29 von 31 Testpunkten liegen im Band ±2·s_y, und der RMSE ist kleiner als im Notebook-Lauf.',
       next: 'Vergleiche in der Laufliste nur RMSE und Vorzeichen: Die log ML dieses Laufs gilt für log(y) und lässt sich mit den anderen nicht vergleichen.',

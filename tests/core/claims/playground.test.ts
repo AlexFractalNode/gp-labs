@@ -91,6 +91,7 @@ describe('playground scenario claims', () => {
     expect(state.points).toHaveLength(4)
     const xs = state.points.map((p) => p.x)
     claim('p2', '-1', Math.min(...xs), 0)
+    expect(Math.max(...xs)).toBe(0.5)
     claim('p2', '0.5', Math.max(...xs), 1)
     expect(pinnedX).not.toBeNull()
     claim('p2', '3', pinnedX!, 0)
@@ -103,6 +104,7 @@ describe('playground scenario claims', () => {
 
     // "At the rightmost data point, x* = 0.5"
     const right = Math.max(...xs)
+    expect(right).toBe(0.5)
     claim('p2', '0.5', right, 1)
     const r05 = inspectAt(state, right)
     claim('p2', '0.099', r05.sdF, 3)
@@ -150,8 +152,11 @@ describe('playground scenario claims', () => {
     expect(p45.points).toEqual(state.points)
     expect(p47.points).toEqual(state.points)
 
-    // The maximum: a point found once with the optimiser (500 points take minutes there, so it is not rerun);
-    // a vanishing gradient in log parameters shows that it is a stationary point.
+    // The maximum: measured on 2026-10-16 with optimizeHyperparameters from hyper-43 as the Playground worker runs
+    // it (restarts 3, seed 1): it ends at ℓ = 0.1035, σ = 1.616, σₙ = 0.407, log ML −294.47, which backs
+    // "Optimise hyperparameters finds it". That run takes about 4 minutes in Vitest (500 points), too slow for the
+    // suite, so the optimiser is not run here; instead a vanishing gradient in log parameters shows that this
+    // point is stationary.
     const best = { ell: 0.1035, sigma: 1.6162, sigmaN: 0.4074 }
     const model: GpModel = {
       kernel: { terms: [[{ kind: 'rbf', params: { sigma: best.sigma, ell: best.ell } }]] },
@@ -170,6 +175,8 @@ describe('playground scenario claims', () => {
     expect(grad.length).toBe(3)
     for (const g of grad) expect(Math.abs(g)).toBeLessThan(0.5)
     expect(lmlBest).toBeGreaterThan(Math.max(lml43, lml45, lml47))
+    // "both [small length scales] stay far below the maximum"
+    expect(lmlBest - Math.max(lml45, lml47)).toBeGreaterThan(200)
   })
 
   it('every listed number is proven', () => {

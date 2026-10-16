@@ -48,6 +48,13 @@ describe('playground key', () => {
     expect(playgroundKey(freshPlayground('hyper-43', null))).toBe(playgroundKey(expectedPlaygroundSettings(sc('p3'))))
     expect(playgroundKey(freshPlayground('hyper-43', null))).toBe(playgroundKey(freshPlayground('hyper-43', null)))
     expect(expectedPlaygroundSettings(sc('p3'))).toBe(expectedPlaygroundSettings(sc('p3')))
+    // Shared, hence deeply frozen.
+    const p3 = expectedPlaygroundSettings(sc('p3'))
+    expect(Object.isFrozen(p3)).toBe(true)
+    expect(Object.isFrozen(p3.points)).toBe(true)
+    expect(Object.isFrozen(p3.points[0])).toBe(true)
+    expect(Object.isFrozen(p3.kernel.terms[0][0].params)).toBe(true)
+    expect(Object.isFrozen(p3.mean)).toBe(true)
     expect(expectedPlaygroundSettings(sc('p2')).pinnedX).toBe(3)
     expect(expectedPlaygroundSettings(sc('p3')).pinnedX).toBeNull()
   })

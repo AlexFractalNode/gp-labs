@@ -586,7 +586,7 @@ const en: Messages<typeof de> = {
       title: 'Length scale too large, too small (Ch. 12)',
       short: 'How the length scale shapes the likelihood',
       see: 'Code 43: 500 noisy sine points and an RBF with ℓ = 1. The curve smooths the oscillations away; the log ML is −1553.4.',
-      watch: 'Code 45 with ℓ = 0.001 reaches −868.3, Code 47 with ℓ = 0.01 and σ = 5 reaches −531.9: length scales that are too small chase every data point.',
+      watch: 'Code 45 with ℓ = 0.001 reaches −868.3, Code 47 with ℓ = 0.01 and σ = 5 reaches −531.9: length scales that are too small chase every data point, and both stay far below the maximum.',
       next: 'The maximum lies near ℓ ≈ 0.10 (with σ ≈ 1.62 and σₙ ≈ 0.41) at log ML ≈ −294.5. “Optimise hyperparameters” finds it, but takes a while with 500 points.',
     },
     k1: {
@@ -626,7 +626,7 @@ const en: Messages<typeof de> = {
     },
     d3: {
       title: 'Log target (Ch. 17)',
-      short: 'Predictions on the log scale, never negative',
+      short: 'Model on log(y), predictions never negative',
       see: 'The notebook template on log(y), without restarts so that the run finishes quickly. Result: test RMSE 0.369.',
       watch: 'No test prediction is negative any more, 29 of 31 test points lie inside the ±2·s_y band, and the RMSE is smaller than in the notebook run.',
       next: 'In the run list, compare only RMSE and signs: the log ML of this run refers to log(y) and cannot be compared with the others.',

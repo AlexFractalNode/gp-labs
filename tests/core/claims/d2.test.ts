@@ -20,6 +20,9 @@ describe('d2 scenario claims', () => {
     claim('d2', '305.75', r.logML, 2)
     expect(r.metrics.rmseTest).toBeGreaterThan(D1.rmseTest + 0.0005)
     expect(r.logML).toBeLessThan(D1.logML - 0.005)
+    // d2.next: "the negative predictions disappear" (with the log target) presumes d2 has some
+    expect(r.test.yPred.some((v) => v < 0)).toBe(true)
+    expect(r.warnings).toContain('negativePredictions')
   })
 
   it('every listed number is proven', () => {
