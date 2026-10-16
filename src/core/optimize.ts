@@ -32,6 +32,12 @@ const C1 = 1e-4
 const MAX_BACKTRACK = 50
 /** Curvature pairs with sᵀy at or below this are skipped. */
 const MIN_CURVATURE = 1e-10
+/**
+ * Default relative-reduction tolerance: scipy's L-BFGS-B default factr·eps = 1e7 · 2.22e-16 (what sklearn uses).
+ * Without it, flat directions (an ARD ℓ or σ₀ drifting towards a bound) keep the projected gradient just above
+ * `tol` while f only changes at rounding level, and every iteration burns its line search up to maxIter.
+ */
+const DEFAULT_FTOL = 1e7 * Number.EPSILON
 /** Parameters closer than this (log units) to a bound are reported in `atBound`. */
 const AT_BOUND_TOL = 1e-3
 /** Random starts are drawn within ±START_SPREAD log units of the current values (clipped to the bounds). */
@@ -126,18 +132,20 @@ function lineSearch(
  * Projected L-BFGS with Armijo backtracking on the box [lower, upper].
  * Iterates are clamped to the bounds; variables at a bound whose gradient points outward are held fixed
  * (their search direction is zero) and the history is reset whenever this active set changes.
- * Converged when the projected-gradient max-norm ‖P(x − g) − x‖∞ < tol.
+ * Converged when the projected-gradient max-norm ‖P(x − g) − x‖∞ < tol, or (scipy's factr criterion) when an
+ * accepted step reduces f by at most ftol relative: (f_k − f_{k+1}) / max(|f_k|, |f_{k+1}|, 1) ≤ ftol.
  */
 export function lbfgsb(
   f: Objective,
   x0: Float64Array,
   lower: Float64Array,
   upper: Float64Array,
-  opts?: { maxIter?: number; m?: number; tol?: number },
+  opts?: { maxIter?: number; m?: number; tol?: number; ftol?: number },
 ): OptResult {
   const maxIter = opts?.maxIter ?? 200
   const m = opts?.m ?? 7
   const tol = opts?.tol ?? 1e-6
+  const ftol = opts?.ftol ?? DEFAULT_FTOL
   const n = x0.length
   if (lower.length !== n || upper.length !== n) {
     throw new GpError('InvalidInput', { reason: 'boundsLength', n, lower: lower.length, upper: upper.length })
@@ -213,8 +221,10 @@ export function lbfgsb(
         RHO.shift()
       }
     }
+    const reduction = (cur.value - accepted.value) / Math.max(Math.abs(cur.value), Math.abs(accepted.value), 1)
     x = accepted.x
     cur = accepted
+    if (reduction <= ftol) return { x, value: cur.value, iterations: iter, converged: true }
   }
   return { x, value: cur.value, iterations: iter, converged: false }
 }

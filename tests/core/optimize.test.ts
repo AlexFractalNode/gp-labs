@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { GpError } from '../../src/core/errors'
-import { logMarginalLikelihood, type GpModel } from '../../src/core/gp'
+import { logMarginalLikelihood, modelParams, withModelLogParams, type GpModel } from '../../src/core/gp'
 import { fromRows, type Mat } from '../../src/core/linalg'
 import { lbfgsb, optimizeHyperparameters } from '../../src/core/optimize'
 import { loadGolden } from '../helpers/golden'
@@ -200,5 +200,46 @@ describe('optimizeHyperparameters', () => {
     expect(b.logML).toBe(a.logML)
     expect(b.atBound).toEqual(a.atBound)
     expect(b.runs.map((r) => Array.from(r.x))).toEqual(a.runs.map((r) => Array.from(r.x)))
+  })
+
+  it('lets an irrelevant ARD length scale reach its upper bound without failed evaluations', () => {
+    // y depends on x0 only, so ell_1 runs to its upper bound log(1e5). The projection lands exactly on the
+    // log-bound; if exp(log(1e5)) > 1e5 were rejected there, every iteration would burn its line search on
+    // failed points while ell_1 creeps towards the bound (Daten-Lab ARD on Yacht: ~40 evaluations per iteration
+    // up to maxIter, 500–650 s per restart instead of ~20 s).
+    const rows: number[][] = []
+    const yv: number[] = []
+    for (let i = 0; i < 30; i++) {
+      const x0 = -2 + (4 * i) / 29
+      const x1 = Math.sin(7 * i)
+      rows.push([x0, x1])
+      yv.push(Math.sin(1.5 * x0) + 0.05 * Math.cos(11 * i))
+    }
+    const X = fromRows(rows)
+    const y = Float64Array.from(yv)
+    const model: GpModel = {
+      kernel: { terms: [[{ kind: 'rbf', params: { sigma: 1, ell_0: 1, ell_1: 1e4 }, ard: true }]] },
+      sigmaN: 0.1,
+      mean: { kind: 'zero' },
+    }
+    const info = modelParams(model, 2)
+    let evals = 0
+    let failed = 0
+    const objective = (theta: Float64Array) => {
+      evals++
+      try {
+        const r = logMarginalLikelihood(withModelLogParams(model, 2, theta), X, y)
+        return { value: -r.value, grad: r.grad.map((v) => -v) }
+      } catch (e) {
+        failed++
+        throw e
+      }
+    }
+    // ftol 0: f is already flat in ell_1 at the start, the relative-reduction stop would end the run before the bound.
+    const res = lbfgsb(objective, info.logValues, info.logLower, info.logUpper, { maxIter: 200, ftol: 0 })
+    expect(failed).toBe(0)
+    expect(res.x[2]).toBe(info.logUpper[2])
+    expect(res.iterations).toBeLessThan(100)
+    expect(evals).toBeLessThan(400)
   })
 })

@@ -540,12 +540,17 @@ export function withLogParams(spec: KernelSpec, inputDim: number, logValues: Flo
   if (logValues.length !== info.names.length) {
     throw new GpError('InvalidInput', { reason: 'logValuesLength', expected: info.names.length, got: logValues.length })
   }
+  const [lo, hi] = PARAM_BOUNDS
   const out: KernelSpec = { terms: spec.terms.map((t) => t.map(copyFactor)) }
   let idx = 0
   out.terms.forEach((term) =>
     term.forEach((f) => {
       for (const key of freeKeys(f)) {
-        const v = Math.exp(logValues[idx++])
+        const lv = logValues[idx++]
+        let v = Math.exp(lv)
+        // exp(log b) can miss b by an ulp (exp(log(1e5)) > 1e5); without this the log-bounds themselves would fail
+        // the paramRange check. Log values beyond the log-bounds stay out of range.
+        if (lv >= info.logLower[idx - 1] && lv <= info.logUpper[idx - 1]) v = Math.min(hi, Math.max(lo, v))
         if (!(v > 0) || !Number.isFinite(v)) throw new GpError('InvalidInput', { reason: 'logValue', index: idx - 1 })
         f.params[key] = v
       }

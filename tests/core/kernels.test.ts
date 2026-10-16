@@ -144,6 +144,25 @@ describe('freeParams / withLogParams', () => {
   it('rejects a logValues vector of the wrong length', () => {
     expectThrowsCode(() => withLogParams(spec, 1, new Float64Array(2)), 'InvalidInput')
   })
+
+  it('maps the log-bounds onto valid parameters although exp(log b) misses b by an ulp', () => {
+    // exp(log(1e5)) = 100000.00000000001 > 1e5 and exp(log(1e-5)) < 1e-5 would fail the paramRange check.
+    expect(Math.exp(Math.log(1e5))).toBeGreaterThan(1e5)
+    const p = freeParams(spec, 1)
+    for (const bound of [p.logUpper, p.logLower]) {
+      const s2 = withLogParams(spec, 1, bound)
+      expect(isKernelSpec(s2)).toBe(true)
+      expect(() => kernelMatrix(s2, col([0, 1]), col([0, 1]), { sameSet: true })).not.toThrow()
+    }
+    expect(withLogParams(spec, 1, p.logUpper).terms[0][0].params.sigma).toBe(1e5)
+    expect(withLogParams(spec, 1, p.logLower).terms[0][0].params.sigma).toBe(1e-5)
+  })
+
+  it('still rejects log values beyond the log-bounds', () => {
+    const p = freeParams(spec, 1)
+    const beyond = Float64Array.from(p.logUpper, (v) => v + 1e-6)
+    expectThrowsCode(() => kernelMatrix(withLogParams(spec, 1, beyond), col([0]), col([0])), 'InvalidInput')
+  })
 })
 
 describe('kernelGradients', () => {

@@ -393,3 +393,21 @@ describe('Yacht notebook reproduction (Code 90–94)', () => {
     120_000,
   )
 })
+
+describe('Daten-Lab optimisation runtime (Yacht, notebook kernel, log y)', () => {
+  it('stops every restart once f only changes at rounding level instead of creeping to maxIter', () => {
+    // σ₀ drifts towards its lower bound through a flat valley: the projected gradient stays above tol while f is
+    // constant to ~1e-9. Without the relative-reduction stop, restarts 2 and 5 here run all 500 iterations (on all
+    // 277 training rows restart 2 took > 19 min instead of ~20 s).
+    const ds = prepareDataset(yachtTable(), 'y', FEATURES)
+    const split = { train: NOTEBOOK_SPLIT.train.slice(0, 80), test: NOTEBOOK_SPLIT.test }
+    const cfg: RunConfig = { dataset: ds, split, logTarget: true, template: 'notebook', restarts: 5, seed: 42 }
+    const { Xtrain, ytrain } = prepareRun(cfg)
+    const opt = optimizeHyperparameters(buildModel('notebook', 6), Xtrain, ytrain, { restarts: 5, seed: 42, maxIter: 500 })
+    for (const run of opt.runs) {
+      expect(run.converged).toBe(true)
+      expect(run.iterations).toBeLessThan(100)
+    }
+    expect(opt.logML).toBeCloseTo(8.0947, 3)
+  })
+})
