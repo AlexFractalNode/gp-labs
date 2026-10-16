@@ -455,7 +455,8 @@ function adoptScenario(s: Scenario) {
   adopting.value = true
   pendingAdoption = loadYacht()
     .then(() => {
-      if (gen !== scenario.generation.value) return
+      // superseded, or closed / left for an address without scenario (e.g. `?kernel=`) while loading
+      if (gen !== scenario.generation.value || scenario.active.value !== s) return
       const settings = s.datalab
       if (settings && loadState.value === 'ready' && source.value?.kind === 'yacht') {
         template.value = settings.template
@@ -496,8 +497,9 @@ const scenario = useScenario('datalab', {
       restarts: restarts.value,
     }),
   expectedKey: (s) => datalabKey(expectedDatalabSettings(s)),
-  // loading data or applying settings is no deviation (otherwise "changed" flashes for a flush after the load)
-  settled: () => loadState.value !== 'loading' && !adopting.value,
+  // Only loaded data can deviate: while loading or applying settings "changed" would flash for a flush after the
+  // load; after a failed load (`error`, `source` may still hold older data) there is nothing to compare.
+  settled: () => loadState.value === 'ready' && !adopting.value,
   actions: { startRun: scenarioStartRun },
 })
 // A cold start with a scenario adopts it in onMounted; until then the box must not report a deviation either.

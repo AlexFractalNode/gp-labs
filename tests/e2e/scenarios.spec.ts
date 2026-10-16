@@ -437,3 +437,38 @@ test('an unknown Daten-Lab scenario shows a notice, no box and loads nothing', a
   await expect(lab(page)).toHaveAttribute('data-verify-runs', '0')
   expect(errors).toEqual([])
 })
+
+test('d1 with a failed Yacht load: no deviation and no run, the data step shows the error', async ({ page }) => {
+  const errors = trackErrors(page)
+  await page.route('**/data/yacht.csv', (r) => r.abort())
+  await page.goto(`/${scenarioHref(scenario('d1'), 'de')}`)
+  await expect(note(page)).toHaveAttribute('data-verify-state', 'ready', T)
+  await expect(note(page)).toHaveAttribute('data-verify-scenario', 'd1')
+  const preview = page.locator(unit('datalab-preview'))
+  await expect(preview).toHaveAttribute('data-verify-state', 'error', T)
+  await expect(preview).toHaveAttribute('data-verify-error', 'datalab.data.fetchFailed')
+  await expect(note(page)).toHaveAttribute('data-verify-deviated', 'false')
+  await expect(lab(page)).toHaveAttribute('data-verify-runs', '0')
+  await expect(lab(page)).toHaveAttribute('data-verify-step', 'data')
+  // the browser logs the aborted request itself; nothing else may fail
+  expect(errors.filter((e) => !/Failed to load resource/.test(e))).toEqual([])
+})
+
+test('d3 closed while the Yacht data load: its settings are not applied and no run starts', async ({ page }) => {
+  const errors = trackErrors(page)
+  await page.route('**/data/yacht.csv', async (r) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await r.continue()
+  })
+  await page.goto(`/${scenarioHref(scenario('d3'), 'de')}`)
+  await expect(note(page)).toHaveAttribute('data-verify-state', 'ready', T)
+  await note(page).locator('[data-action="close"]').click()
+  await expect(note(page)).toHaveAttribute('data-verify-state', 'empty')
+  await expect(page.locator(unit('datalab-preview'))).toHaveAttribute('data-verify-state', 'ready', T)
+  await page.waitForTimeout(500)
+  // the defaults of a new table (resetSelection), not the notebook split and log target of d3
+  await expect(page.locator(unit('datalab-split'))).toHaveAttribute('data-verify-mode', 'random')
+  await expect(page.locator('input[data-field="log-target"]')).not.toBeChecked()
+  await expect(lab(page)).toHaveAttribute('data-verify-runs', '0')
+  expect(errors).toEqual([])
+})
