@@ -76,6 +76,9 @@ const chapterText = (chapter: string) =>
             {{ t(tool.goal) }}
           </p>
           <RefBadge :chapter="TOOL_REFS[tool.route].chapter" :code="TOOL_REFS[tool.route].code" />
+          <div class="card-actions">
+            <a class="open" :href="buildHash(tool.route)" data-open-link>{{ t('home.open', { tool: t(tool.name) }) }}</a>
+          </div>
           <div class="scenarios">
             <h5 class="scenarios-label">{{ t('home.scenarios') }}</h5>
             <ul>
@@ -83,9 +86,6 @@ const chapterText = (chapter: string) =>
                 <a :href="scenarioHref(s)" :data-scenario-link="s.id">{{ t(scenarioTitle(s)) }}</a>
               </li>
             </ul>
-          </div>
-          <div class="card-actions">
-            <a class="open" :href="buildHash(tool.route)" data-open-link>{{ t('home.open', { tool: t(tool.name) }) }}</a>
           </div>
         </li>
       </ul>

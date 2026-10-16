@@ -285,10 +285,15 @@ function fitAxes() {
 
 const presetParam = computed(() => route.value.params.get('preset'))
 
-function load() {
+/**
+ * Loads the preset from the address. `withScenario` (default) adopts the spec of a matching scenario; "Preset neu
+ * laden" passes false and gets the plain gallery spec, so "modified" disappears and a standing scenario shows
+ * "changed" (Spec §3.3).
+ */
+function load(withScenario = true) {
   const { preset: p } = loadKernelPreset(presetParam.value)
   preset.value = p
-  spec.value = scenarioSpec() ?? p.spec
+  spec.value = (withScenario ? scenarioSpec() : null) ?? p.spec
   seed.value = p.seed ?? 1
   x0.value = (p.domain[0] + p.domain[1]) / 2
   const d2 = p.domain2 ?? p.domain
@@ -314,13 +319,18 @@ function scenarioSpec(): KernelSpec | null {
 /**
  * Loads once per route object (Spec §3.3): the preset watcher, the scenario adoption and the mount all land here,
  * so watcher order and double triggers do not matter, and `refreshRoute` (a new route object) always reloads.
- * "Reset" and `selectPreset` on the same address still call `load()` directly.
+ * "Reset" (`resetPreset`) and `selectPreset` on the same address still call `load()` directly.
  */
 let loadedFor: RouteState | null = null
 function loadOnce() {
   if (loadedFor === route.value) return
   loadedFor = route.value
   load()
+}
+
+/** "Preset neu laden": restores the chosen gallery example (spec, seed, x₀), ignoring a standing scenario. */
+function resetPreset() {
+  load(false)
 }
 
 function selectPreset(name: string) {
@@ -462,7 +472,7 @@ const x0bStep = computed(() => (domain2.value[1] - domain2.value[0]) / 200)
     <p class="note">
       <span>{{ t(`kernels.note.${preset.name}` as MessageKey) }}</span>
       <span v-if="modified" class="tag">{{ t('kernels.modified') }}</span>
-      <button v-if="modified" type="button" class="btn small-btn" @click="load">{{ t('kernels.reset') }}</button>
+      <button v-if="modified" type="button" class="btn small-btn" @click="resetPreset">{{ t('kernels.reset') }}</button>
     </p>
 
     <div class="kb-grid">

@@ -19,8 +19,18 @@ const props = defineProps<{
 const emit = defineEmits<{ pin: [x: number]; unpin: [] }>()
 const { lang, t } = useI18n()
 
+/**
+ * `signDisplay: 'negative'` drops the sign of values that round to zero (no "-0,000" for a mean of −3·10⁻⁶). The
+ * option is ES2023; the cast only bridges the ES2022 lib typings of this project.
+ */
 const fmt = computed(
-  () => new Intl.NumberFormat(lang.value, { minimumFractionDigits: 3, maximumFractionDigits: 3, useGrouping: false }),
+  () =>
+    new Intl.NumberFormat(lang.value, {
+      minimumFractionDigits: 3,
+      maximumFractionDigits: 3,
+      useGrouping: false,
+      signDisplay: 'negative' as Intl.NumberFormatOptions['signDisplay'],
+    }),
 )
 const f3 = (v: number) => fmt.value.format(v)
 /** The same number for KaTeX: the decimal comma needs braces to avoid extra spacing. */

@@ -572,7 +572,7 @@ const en: Messages<typeof de> = {
       purpose: 'Here you see how a Gaussian process predicts a whole curve from a few data points and says how sure it is. You place points, change the kernel, the noise and the mean function, and watch how the prediction and its uncertainty respond.',
       read: {
         plot: 'The large area shows the prediction over the input x. The dark line is the mean; the bands show how far the function, and how far a new measurement, may deviate from it. Near the points the band is narrow, far from them it is wide.',
-        layers: 'The layers switch single parts of the plot on and off: data points, mean, the band of the function, the wider band of new measurements, samples and the given mean. The small swatch next to each name helps you find the layer in the plot.',
+        layers: 'The layers switch single parts of the plot on and off: data points, mean, the band of the function, the wider band of new measurements, samples and the given mean. For examples with a known curve, such as the sine data, “True function” is added: the curve the data points were generated from. The small swatch next to each name helps you find the layer in the plot.',
         inspector: 'The inspector gives the numbers at one location x*: the predicted mean and the standard deviations of the function and of a new measurement. It follows the mouse pointer until you pin a location.',
         model: 'Here you find the kernel in use, as a formula, and its sliders. The kernel decides how closely neighbouring locations are linked, and with that how smooth the curves are and how far they swing.',
         mean: 'The mean function is the curve the prediction returns to far away from the data. By default it is zero; the GLS variants estimate a constant or a straight line from the data.',
@@ -588,7 +588,7 @@ const en: Messages<typeof de> = {
         fitAxes: 'Fits the vertical axis to the points and curves when something has left the picture.',
         pin: 'Enter a location and press “Pin”: the inspector then stays there. “Unpin” lets it follow the pointer again.',
         kernelParams: 'The kernel sliders, such as signal strength σ (how far the curves swing) and length scale ℓ (how quickly they change).',
-        hyper: 'Appears with the notebook examples and sets ℓ and σ_f to the values of the named code cell.',
+        hyper: 'Appears only with the hyperparameter examples (Code 43, 45 and 47). A click loads the example of the chosen code cell anew, with its ℓ and σ_f; your own changes are lost.',
         sigmaN: 'How noisy the measurements are. More noise lets the curve pass the points more loosely and widens the band of new measurements.',
         mean: 'Chooses the mean function: zero, a constant c, a line a + b·x, or one estimated from the data (GLS).',
         optimize: 'Searches for the kernel sliders and σₙ at which the log marginal likelihood is largest, and sets them. With many points this takes a while; “Cancel” stops the search.',
@@ -673,7 +673,7 @@ const en: Messages<typeof de> = {
       short: 'What the GP predicts far away from every point',
       see: 'Four data points between x = −1 and x = 0.5; x* is pinned at 3. There the GP is back at its prior: f̄* = 0, s_f = 1.000 and s_y = 1.005.',
       watch: 'At the rightmost data point, x* = 0.5, s_f is only 0.099. The further x* moves away from the data, the closer the band gets to the prior width.',
-      next: 'Choose “Constant c” or “GLS constant” as the mean function: far from the data the prediction then heads for that value instead of 0.',
+      next: 'Choose “GLS constant” as the mean function: far from the data the prediction then heads for a constant estimated from the data instead of 0. “Constant c” does the same once you move c.',
     },
     p3: {
       title: 'Length scale too large, too small (Ch. 12)',
@@ -720,7 +720,7 @@ const en: Messages<typeof de> = {
     d3: {
       title: 'Log target (Ch. 17)',
       short: 'Model on log(y), predictions never negative',
-      see: 'The notebook template on log(y), without restarts so that the run finishes quickly. Result: test RMSE 0.369.',
+      see: 'The notebook template on log(y), with a single optimisation run and no restarts. Result: test RMSE 0.369.',
       watch: 'No test prediction is negative any more, 29 of 31 test points lie inside the ±2·s_y band, and the RMSE is smaller than in the notebook run.',
       next: 'In the run list, compare only RMSE and signs: the log ML of this run refers to log(y) and cannot be compared with the others.',
     },

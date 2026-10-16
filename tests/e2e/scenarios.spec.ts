@@ -75,6 +75,9 @@ const CHECKS: Record<string, (page: Page) => Promise<void>> = {
   },
   p2: async (page) => {
     await expect(inspector(page)).toHaveAttribute('data-verify-state', 'ready', T)
+    // the mean is about −3·10⁻⁶: shown as 0,000, without a minus sign
+    await expect(field(page, 'mean')).toContainText('0,000')
+    await expect(field(page, 'mean')).not.toContainText(/[−-]0,000/)
     await expect(field(page, 'sdF')).toContainText('1,000')
     await expect(field(page, 'sdY')).toContainText('1,005')
   },
@@ -216,6 +219,32 @@ test('k3: clicking the active card again resets a moved exponent', async ({ page
   expect(errors).toEqual([])
 })
 
+test('k3: "Reset" under the open box loads the plain preset as a deviation; restore brings back p = 2.5', async ({
+  page,
+}) => {
+  const errors = trackErrors(page)
+  await openScenario(page, scenario('k3'), 'link')
+  await expectInvalidPowerExp(page)
+  const p = page.getByRole('slider', { name: 'Exponent p' })
+  await expect(p).toHaveValue('2.5')
+  await expect(note(page)).toHaveAttribute('data-verify-deviated', 'false')
+  const reset = page.getByRole('button', { name: de.kernels.reset })
+  await reset.click()
+  await expect(p).toHaveValue('2')
+  await expect(validity(page)).toHaveAttribute('data-verify-state', 'ready', T)
+  await expect(validity(page)).toHaveAttribute('data-verify-negatives', '0')
+  await expect(note(page)).toHaveAttribute('data-verify-deviated', 'true')
+  // the plain gallery preset counts as unmodified: tag and button disappear
+  await expect(reset).toHaveCount(0)
+  await expect(page.getByText(de.kernels.modified, { exact: true })).toHaveCount(0)
+  await expect(page).toHaveURL(/scenario=k3/)
+  await note(page).locator('[data-action="restore"]').click()
+  await expect(p).toHaveValue('2.5', T)
+  await expectInvalidPowerExp(page)
+  await expect(note(page)).toHaveAttribute('data-verify-deviated', 'false')
+  expect(errors).toEqual([])
+})
+
 test('k3: after closing the box, "Reset" loads the plain preset (the scenario spec is not applied)', async ({
   page,
 }) => {
@@ -235,8 +264,10 @@ test('a scenario of another tool is ignored with a notice and removed from the a
   const errors = trackErrors(page)
   await page.goto('/#/playground?scenario=d1&lang=de')
   await expect(plot(page)).toHaveAttribute('data-verify-state', 'ready', T)
+  // removed at once: a single read right after the plot is ready, no retrying assertion
+  expect(await page.evaluate(() => location.hash)).not.toContain('scenario=')
   const bar = page.locator(unit('notice-bar'))
-  expect(Number(await bar.getAttribute('data-verify-count'))).toBeGreaterThanOrEqual(1)
+  await expect(bar).toHaveAttribute('data-verify-count', /^[1-9]\d*$/)
   await expect(bar).toContainText(de.notice.unknownScenario)
   await expect(note(page)).toHaveAttribute('data-verify-state', 'empty')
   await expect(page).not.toHaveURL(/scenario=/)

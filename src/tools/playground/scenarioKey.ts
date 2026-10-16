@@ -51,7 +51,13 @@ function pinnedFrom(x: string | undefined): number | null {
   return Number.isFinite(v) ? v : null
 }
 
-const memo = new Map<string, PlaygroundSettings>()
+/**
+ * The memoised settings are deep-frozen. The type marks the top level read-only; the nested points and specs keep
+ * their mutable types, so the result still flows into `PlaygroundState` and the kernel functions without casts.
+ */
+export type FrozenPlaygroundSettings = Readonly<PlaygroundSettings>
+
+const memo = new Map<string, FrozenPlaygroundSettings>()
 
 /** Freezes an object graph in place (the memoised settings are shared between all callers). */
 function deepFreeze<T>(v: T): T {
@@ -67,13 +73,13 @@ function deepFreeze<T>(v: T): T {
  * `query.x`. Memoised per scenario id (the sine presets would rebuild 500 points per call); the result is shared
  * and deeply frozen, so callers copy before editing. Throws for a scenario of another tool.
  */
-export function expectedPlaygroundSettings(s: Scenario): PlaygroundSettings {
+export function expectedPlaygroundSettings(s: Scenario): FrozenPlaygroundSettings {
   assertTool(s, 'playground')
   const hit = memo.get(s.id)
   if (hit) return hit
   const { state } = loadPreset(s.query.preset ?? null)
   const { model } = resolveKernel(s.query[KERNEL_PARAM] ?? null, state.model)
-  const settings: PlaygroundSettings = deepFreeze({
+  const settings: FrozenPlaygroundSettings = deepFreeze({
     points: state.points,
     kernel: model.kernel,
     sigmaN: model.sigmaN,

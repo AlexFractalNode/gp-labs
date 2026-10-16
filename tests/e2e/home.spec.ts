@@ -120,8 +120,10 @@ test('no horizontal scroll on any route at 390 px (DE and EN)', async ({ page })
   await page.setViewportSize({ width: 390, height: 844 })
   for (const route of ['', 'playground', 'kernels', 'datalab']) {
     for (const lang of ['de', 'en']) {
+      await page.goto('about:blank') // a hash-only navigation would keep the language of the loaded page
       await page.goto(`/#/${route}?lang=${lang}`)
       await expect(page.locator('[data-verify-unit="app-shell"]')).toHaveAttribute('data-verify-route', route || 'home')
+      await expect(page.locator('html')).toHaveAttribute('lang', lang)
       await page.waitForLoadState('networkidle')
       const width = await page.evaluate(() => document.documentElement.scrollWidth)
       expect(width, `#/${route} (${lang})`).toBeLessThanOrEqual(390)

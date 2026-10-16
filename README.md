@@ -77,6 +77,10 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
+Both suites are slow on purpose: `npm test` includes the Daten-Lab claim files `tests/core/claims/d1`–`d3` (about a
+minute each, run in parallel), and the scenario end-to-end tests take several minutes; do not start either in
+parallel with other heavy runs.
+
 ### What the golden tests prove, and what they do not
 
 `scripts/make_golden.py` computes reference values in Python; the TypeScript core is checked against them in Vitest.

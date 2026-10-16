@@ -568,7 +568,7 @@ const de = {
       purpose: 'Hier siehst du, wie ein Gauß-Prozess aus wenigen Messpunkten eine ganze Kurve vorhersagt und dabei angibt, wie sicher er sich ist. Du setzt Punkte, verstellst Kernel, Rauschen und Mittelwertfunktion und beobachtest, wie Vorhersage und Unsicherheit darauf reagieren.',
       read: {
         plot: 'Die große Fläche zeigt die Vorhersage über der Eingabe x. Die dunkle Linie ist der Mittelwert, die Bänder zeigen, wie weit die Funktion und wie weit eine neue Messung davon abweichen können. Nahe den Punkten wird das Band schmal, fern davon breit.',
-        layers: 'Die Ebenen schalten einzelne Teile der Grafik ein und aus: Messpunkte, Mittelwert, das Band der Funktion, das breitere Band neuer Messungen, Samples und den vorgegebenen Mittelwert. Das kleine Musterfeld neben jedem Namen hilft, die Ebene in der Grafik wiederzufinden.',
+        layers: 'Die Ebenen schalten einzelne Teile der Grafik ein und aus: Messpunkte, Mittelwert, das Band der Funktion, das breitere Band neuer Messungen, Samples und den vorgegebenen Mittelwert. Bei Beispielen mit bekannter Kurve, etwa den Sinusdaten, kommt „Wahre Funktion“ hinzu: die Kurve, aus der die Messpunkte erzeugt wurden. Das kleine Musterfeld neben jedem Namen hilft, die Ebene in der Grafik wiederzufinden.',
         inspector: 'Der Inspektor nennt die Zahlen an einer Stelle x*: den vorhergesagten Mittelwert und die Standardabweichungen der Funktion und einer neuen Messung. Er folgt dem Mauszeiger, bis du eine Stelle festhältst.',
         model: 'Hier stehen der verwendete Kernel als Formel und seine Regler. Der Kernel legt fest, wie eng benachbarte Stellen zusammenhängen, und damit, wie glatt die Kurven sind und wie weit sie ausschlagen.',
         mean: 'Die Mittelwertfunktion ist die Kurve, zu der die Vorhersage fern der Daten zurückkehrt. Ohne Wahl ist das die Null; die GLS-Varianten schätzen eine Konstante oder eine Gerade aus den Daten.',
@@ -584,7 +584,7 @@ const de = {
         fitAxes: 'Passt die senkrechte Achse an Punkte und Kurven an, wenn etwas aus dem Bild geraten ist.',
         pin: 'Trage eine Stelle ein und drücke „Festhalten“: Der Inspektor bleibt dann dort. „Lösen“ lässt ihn wieder dem Zeiger folgen.',
         kernelParams: 'Die Regler des Kernels, etwa Signalstärke σ (wie weit die Kurven ausschlagen) und Längenskala ℓ (wie schnell sie sich ändern).',
-        hyper: 'Erscheint bei den Notebook-Beispielen und setzt ℓ und σ_f auf die Werte der genannten Code-Zelle.',
+        hyper: 'Erscheint nur bei den Hyperparameter-Beispielen (Code 43, 45 und 47). Ein Klick lädt das Beispiel der gewählten Code-Zelle neu, mit deren ℓ und σ_f; eigene Änderungen gehen dabei verloren.',
         sigmaN: 'Wie stark die Messungen verrauscht sind. Mehr Rauschen lässt die Kurve lockerer an den Punkten vorbeilaufen und verbreitert das Band neuer Messungen.',
         mean: 'Wählt die Mittelwertfunktion: Null, eine Konstante c, eine Gerade a + b·x oder eine aus den Daten geschätzte (GLS).',
         optimize: 'Sucht die Kernel-Regler und σₙ, bei denen die log-marginale Likelihood am größten ist, und stellt sie ein. Bei vielen Punkten dauert das; „Abbrechen“ stoppt die Suche.',
@@ -669,7 +669,7 @@ const de = {
       short: 'Was der GP weit weg von allen Punkten vorhersagt',
       see: 'Vier Messpunkte zwischen x = −1 und x = 0,5, festgehalten ist x* = 3. Dort ist der GP zurück beim Prior: f̄* = 0, s_f = 1,000 und s_y = 1,005.',
       watch: 'Am rechten Messpunkt, bei x* = 0,5, ist s_f nur 0,099. Je weiter x* von den Daten wegrückt, desto näher kommt das Band der Prior-Breite.',
-      next: 'Wähle als Mittelwertfunktion „Konstant c“ oder „GLS konstant“: Fern der Daten läuft die Vorhersage dann auf diesen Wert zu statt auf 0.',
+      next: 'Wähle als Mittelwertfunktion „GLS konstant“: Fern der Daten läuft die Vorhersage dann auf eine aus den Daten geschätzte Konstante zu statt auf 0. „Konstant c“ wirkt genauso, sobald du c verschiebst.',
     },
     p3: {
       title: 'Längenskala zu groß, zu klein (Kap. 12)',
@@ -716,7 +716,7 @@ const de = {
     d3: {
       title: 'Log-Ziel (Kap. 17)',
       short: 'Modell auf log(y), Vorhersagen nie negativ',
-      see: 'Die Notebook-Vorlage auf log(y), ohne Neustarts, damit der Lauf rasch fertig ist. Ergebnis: Test-RMSE 0,369.',
+      see: 'Die Notebook-Vorlage auf log(y), mit nur einem Optimierungslauf ohne Neustarts. Ergebnis: Test-RMSE 0,369.',
       watch: 'Keine Testvorhersage ist mehr negativ, 29 von 31 Testpunkten liegen im Band ±2·s_y, und der RMSE ist kleiner als im Notebook-Lauf.',
       next: 'Vergleiche in der Laufliste nur RMSE und Vorzeichen: Die log ML dieses Laufs gilt für log(y) und lässt sich mit den anderen nicht vergleichen.',
     },
