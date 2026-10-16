@@ -2,6 +2,7 @@
 import { useI18n, type MessageKey } from '../../i18n'
 import { buildHash, type Route } from '../../urlState'
 import RefBadge from '../../ui/RefBadge.vue'
+import { TOOL_REFS } from '../toolRefs'
 
 const { t } = useI18n()
 
@@ -10,21 +11,17 @@ interface ToolCard {
   name: MessageKey
   summary: MessageKey
   goal: MessageKey
-  chapter: string
-  code: string
   /** Optional deep link into a preset, shown as a secondary link. */
   example?: { label: MessageKey; params: Record<string, string> }
 }
 
-// Chapter and notebook references follow the learning goals in Spec §4–6.
+// Chapter and notebook references (TOOL_REFS) follow the learning goals in Spec §4–6.
 const TOOLS: ToolCard[] = [
   {
     route: 'playground',
     name: 'nav.playground',
     summary: 'home.tool.playground.summary',
     goal: 'home.tool.playground.goal',
-    chapter: '1, 6–8, 10–12',
-    code: '17–48',
     example: { label: 'home.tool.playground.example', params: { preset: 'kap9', x: '0' } },
   },
   {
@@ -32,8 +29,6 @@ const TOOLS: ToolCard[] = [
     name: 'nav.kernels',
     summary: 'home.tool.kernels.summary',
     goal: 'home.tool.kernels.goal',
-    chapter: '5, 8, 13',
-    code: '53–70',
     example: { label: 'home.tool.kernels.example', params: { preset: 'power-exp' } },
   },
   {
@@ -41,8 +36,6 @@ const TOOLS: ToolCard[] = [
     name: 'nav.datalab',
     summary: 'home.tool.datalab.summary',
     goal: 'home.tool.datalab.goal',
-    chapter: '14, 15, 17',
-    code: '87–94',
   },
 ]
 
@@ -84,7 +77,7 @@ const chapterText = (chapter: string) =>
             <span class="goal-label">{{ t('home.goal') }}</span>
             {{ t(tool.goal) }}
           </p>
-          <RefBadge :chapter="tool.chapter" :code="tool.code" />
+          <RefBadge :chapter="TOOL_REFS[tool.route].chapter" :code="TOOL_REFS[tool.route].code" />
           <div class="card-actions">
             <a class="open" :href="buildHash(tool.route)">{{ t('home.open', { tool: t(tool.name) }) }}</a>
             <a v-if="tool.example" class="example" :href="buildHash(tool.route, tool.example.params)">
