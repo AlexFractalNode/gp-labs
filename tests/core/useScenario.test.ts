@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { effectScope, nextTick, ref, type EffectScope, type Ref } from 'vue'
+import { effectScope, nextTick, ref, watch, type EffectScope, type Ref } from 'vue'
 import type { Scenario } from '../../src/tools/scenarios'
 
 /*
@@ -233,6 +233,64 @@ describe('useScenario: address not matching the scenario', () => {
     // p1 has no action
     await settle()
     expect(h.actions).toEqual([])
+  })
+})
+
+describe('useScenario: action timing', () => {
+  /*
+   * The watcher is flush: 'sync', so the action's wait starts inside the route trigger, possibly before the view's
+   * pre-flush watchers are queued. No other flush is pending here (no App.vue watcher): the action must still see
+   * that the view's pre watchers ran, registered after useScenario (on the state adopt changed, on the route).
+   */
+  it('runs after the pre-flush watchers the adoption triggered', async () => {
+    history.replaceState(null, '', '#/datalab')
+    const mod: Mod = await import('../../src/tools/useScenario')
+    const { useRoute } = await import('../../src/router')
+    const log: string[] = []
+    const loaded = ref(0)
+    scope = effectScope()
+    scope.run(() => {
+      mod.useScenario('datalab', {
+        adopt: () => {
+          loaded.value++
+          log.push(`adopt ${loaded.value}`)
+        },
+        liveKey: () => '',
+        expectedKey: () => '',
+        actions: { startRun: (s: Scenario, gen: number) => void log.push(`action ${s.id} ${gen}`) },
+      })
+      watch(loaded, (n) => log.push(`viewPre loaded ${n}`))
+      watch(useRoute(), (r) => log.push(`viewPre route ${r.params.get('scenario')}`))
+    })
+    await settle()
+    expect(log).toEqual([])
+    navigate('#/datalab?scenario=d1')
+    await settle()
+    expect(log).toEqual(['adopt 1', 'viewPre loaded 1', 'viewPre route d1', 'action d1 1'])
+    navigate('#/datalab?scenario=d2')
+    await settle()
+    expect(log.slice(4)).toEqual(['adopt 2', 'viewPre loaded 2', 'viewPre route d2', 'action d2 2'])
+  })
+
+  it('runs after the route pre watcher of the view even when adopt queues nothing itself', async () => {
+    history.replaceState(null, '', '#/datalab')
+    const mod: Mod = await import('../../src/tools/useScenario')
+    const { useRoute } = await import('../../src/router')
+    const log: string[] = []
+    scope = effectScope()
+    scope.run(() => {
+      mod.useScenario('datalab', {
+        adopt: (s: Scenario) => void log.push(`adopt ${s.id}`),
+        liveKey: () => '',
+        expectedKey: () => '',
+        actions: { startRun: (s: Scenario) => void log.push(`action ${s.id}`) },
+      })
+      watch(useRoute(), (r) => log.push(`viewPre route ${r.params.get('scenario')}`))
+    })
+    await settle()
+    navigate('#/datalab?scenario=d1')
+    await settle()
+    expect(log).toEqual(['adopt d1', 'viewPre route d1', 'action d1'])
   })
 })
 

@@ -9,14 +9,20 @@
  *    (`hashchange` or `refreshRoute`) with a valid, matching scenario calls `opts.adopt(s)`. A valid scenario on a
  *    non-matching address (gallery switch, "Code 45" with a standing `scenario`) stays active (the note shows
  *    "changed") without adoption; the view loads it through its normal preset path.
- *  - The watcher is `flush: 'sync'`: one adoption per route object, also when several arrive in one tick (two
- *    clicks on a card), so `generation` counts each of them and only the last one's action runs.
+ *  - The watcher is `flush: 'sync'`: one adoption per route object. In a browser each click / `hashchange` is its
+ *    own task; several route objects in one tick (programmatic `applyScenario` calls) are handled defensively:
+ *    `generation` counts each of them and only the last one's action runs. The real guard against superseded runs
+ *    across ticks is the Daten-Lab action, which re-checks the generation after loading (Task 4).
  *  - removeScenarioParam / toggleLang use replaceState and never touch the route ref (no adoption, no action).
- *  - KeepAlive: the watcher keeps running while the view is deactivated; routes of other tools are ignored.
+ *  - KeepAlive: the watcher keeps running while the view is deactivated; routes of other tools are ignored. `adopt`
+ *    may run while a cached view is still deactivated, so it must only change state; DOM work (step switch, focus,
+ *    scroll) belongs in the action.
  *
- * Action timing: the action must see the adopted state, so it runs after `await nextTick()` (after the flush the
- * adoption triggered; in setup, after the mount), once per adoption, and only if the scenario is still active, no
- * later adoption happened (`generation`) and the scope is alive.
+ * Action timing: the action must see the adopted state, so it waits for the whole flush the adoption triggered (in
+ * setup: the mount), once per adoption, and runs only if the scenario is still active, no later adoption happened
+ * (`generation`) and the scope is alive. Because the watcher is sync, the wait starts inside the route trigger,
+ * possibly before the view's pre-flush watchers on the route are queued; so it first yields one microtask (the
+ * trigger has finished and queued the flush by then) and then awaits `nextTick()`, i.e. that flush.
  */
 import {
   computed,
@@ -116,6 +122,8 @@ export function useScenario(tool: ToolId, opts: ScenarioOptions): ScenarioApi {
     if (s.action === undefined) return
     const fn = opts.actions?.[s.action]
     if (fn === undefined) return
+    // one microtask first: the route trigger must finish queueing the view's pre-flush watchers (see header)
+    await Promise.resolve()
     await nextTick()
     // Skip when the view is gone, the scenario was dismissed / replaced, or a later adoption superseded this one.
     if (disposed || active.value !== s || generation.value !== gen) return
