@@ -58,6 +58,8 @@ export function decodeKernel(s: string): KernelSpec | null {
 }
 
 export const KERNEL_PARAM = 'kernel'
+/** Query parameter naming the active scenario of a tool (`src/tools/scenarios.ts`). */
+export const SCENARIO_PARAM = 'scenario'
 
 /** Problems in the parsed URL that warrant a notice; empty when the URL is fine. */
 export function urlProblems(state: {
