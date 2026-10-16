@@ -6,7 +6,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useI18n, type MessageKey } from '../../i18n'
-import { useRoute } from '../../router'
+import { useRoute, type RouteState } from '../../router'
 import { buildHash, encodeKernel, parseHash } from '../../urlState'
 import { GpError } from '../../core/errors'
 import { standardNormals } from '../../core/gp'
@@ -19,6 +19,10 @@ import Heatmap from '../../ui/Heatmap.vue'
 import Formula from '../../ui/Formula.vue'
 import RefBadge from '../../ui/RefBadge.vue'
 import LinearSlider from '../../ui/LinearSlider.vue'
+import ScenarioArea from '../../ui/ScenarioArea.vue'
+import { routeMatchesScenario } from '../scenarios'
+import { useScenario } from '../useScenario'
+import { expectedKernelsSettings, kernelsKey } from './scenarioKey'
 import KernelBuilder from './KernelBuilder.vue'
 import EigenBars from './EigenBars.vue'
 import MarkerLayer from './MarkerLayer.vue'
@@ -284,7 +288,7 @@ const presetParam = computed(() => route.value.params.get('preset'))
 function load() {
   const { preset: p } = loadKernelPreset(presetParam.value)
   preset.value = p
-  spec.value = p.spec
+  spec.value = scenarioSpec() ?? p.spec
   seed.value = p.seed ?? 1
   x0.value = (p.domain[0] + p.domain[1]) / 2
   const d2 = p.domain2 ?? p.domain
@@ -295,6 +299,28 @@ function load() {
   fitAxes()
   computeFrame()
   requestVerdict()
+}
+
+/**
+ * Spec of the active scenario when the address matches it (Spec §3.3), as a deep copy (the registry stays
+ * untouched); null otherwise, e.g. after a gallery switch with a standing `scenario` or after closing the box.
+ */
+function scenarioSpec(): KernelSpec | null {
+  const s = scenario.active.value
+  if (s === null || s.kernels === undefined || !routeMatchesScenario(route.value.params, s)) return null
+  return JSON.parse(JSON.stringify(s.kernels.spec)) as KernelSpec
+}
+
+/**
+ * Loads once per route object (Spec §3.3): the preset watcher, the scenario adoption and the mount all land here,
+ * so watcher order and double triggers do not matter, and `refreshRoute` (a new route object) always reloads.
+ * "Reset" and `selectPreset` on the same address still call `load()` directly.
+ */
+let loadedFor: RouteState | null = null
+function loadOnce() {
+  if (loadedFor === route.value) return
+  loadedFor = route.value
+  load()
 }
 
 function selectPreset(name: string) {
@@ -319,11 +345,17 @@ watch(seed, () => {
   request2d()
 })
 watch(presetParam, () => {
-  if (route.value.route === 'kernels') load()
+  if (route.value.route === 'kernels') loadOnce()
+})
+
+const scenario = useScenario('kernels', {
+  adopt: loadOnce,
+  liveKey: () => kernelsKey({ preset: preset.value.name, spec: spec.value }),
+  expectedKey: (s) => kernelsKey(expectedKernelsSettings(s)),
 })
 
 onMounted(() => {
-  load()
+  loadOnce()
   window.addEventListener('pointerup', stopDrag)
   window.addEventListener('pointercancel', stopDrag)
 })
@@ -424,6 +456,8 @@ const x0bStep = computed(() => (domain2.value[1] - domain2.value[0]) / 200)
         <RefBadge :chapter="preset.ref.chapter" :code="preset.ref.code || undefined" />
       </div>
     </header>
+
+    <ScenarioArea tool="kernels" :scenario="scenario" />
 
     <p class="note">
       <span>{{ t(`kernels.note.${preset.name}` as MessageKey) }}</span>
